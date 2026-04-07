@@ -1,0 +1,56 @@
+# ==========================================
+# LYNDRIX CORE - GITIGNORE
+# ==========================================
+
+# --- Python & Environments ---
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+ENV/
+env.bak/
+venv.bak/
+# NiceGUI build output
+.nicegui/
+# --- Datenbanken ---
+# Ignoriert die lokale SQLite Datenbank, da diese Umgebungsspezifisch ist
+*.db
+*.sqlite
+*.sqlite3
+lyndrix_core.db
+
+# --- Temporäre GitOps Klone ---
+# Ignoriert die Ordner, in die Lyndrix die SSOT Repositories zieht
+temp_ssot_apps/
+temp_ssot_infra/
+temp_*/
+
+# --- Environment Variables & Secrets ---
+# Auch wenn wir Vault nutzen, falls mal eine lokale .env existiert, wird sie ignoriert
+.dev
+vault_data/*
+secure_data/vault_keys.enc
+secure_data
+!.env
+.env.*
+*.pem
+*.key
+Store
+# --- IDE & OS Files ---
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+
+# --- Logs ---
+*.log
+logs/
+vault_recovery_keys.json
+
+db_data/
+vault_data/
+app/plugins/*
+app/plugins
+.cache
