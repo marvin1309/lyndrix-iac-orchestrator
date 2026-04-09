@@ -1,29 +1,28 @@
 from nicegui import ui
 from ui.layout import main_layout 
 from ui.theme import UIStyles
+import json
 
 async def render_dashboard(ctx, state, engine):
+    # Track the last seen task names to avoid unnecessary UI clearing
+    last_active_task_keys = set()
+
     with ui.column().classes('w-full gap-6'):
         
         # --- HEADER & TRIGGERS ---
         with ui.row().classes('w-full justify-between items-center'):
             ui.label('GitOps Dashboard').classes('text-2xl font-bold dark:text-zinc-100')
             
-            # Action Buttons Row
             with ui.row().classes('gap-3'):
-                # Button 1: The Quick Check
-                ui.button(
-                    'Test Connectivity', 
+                ui.button('Test Connectivity', 
                     on_click=lambda: ctx.emit("iac:webhook_verified", {"pipeline_type": "connectivity", "manual": True}),
-                    icon='cable', 
-                    color='blue-6'
+                    icon='cable', color='blue-6'
                 ).props('unelevated rounded').bind_enabled_from(state, 'is_running', backward=lambda x: not x)
 
-                # Button 1.5: Single Service Deploy Dialog
                 def open_single_service_dialog():
                     with ui.dialog() as dialog, ui.card().classes(UIStyles.CARD_GLASS + ' min-w-[300px] border border-zinc-700'):
                         ui.label('Deploy Single Service').classes('text-lg font-bold text-slate-100 mb-2')
-                        svc_name_input = ui.input('Service Name (e.g. my-app)').classes('w-full').props('outlined dense')
+                        svc_name_input = ui.input('Service Name').classes('w-full').props('outlined dense')
                         svc_branch_input = ui.input('Branch', value='main').classes('w-full mt-2').props('outlined dense')
                         
                         def trigger_deploy():
@@ -43,19 +42,12 @@ async def render_dashboard(ctx, state, engine):
                             ui.button('Trigger Deploy', on_click=trigger_deploy, color='indigo').props('unelevated rounded')
                     dialog.open()
 
-                ui.button(
-                    'Deploy Service', 
-                    on_click=open_single_service_dialog,
-                    icon='rocket', 
-                    color='indigo-500'
+                ui.button('Deploy Service', on_click=open_single_service_dialog, icon='rocket', color='indigo-500'
                 ).props('unelevated rounded').bind_enabled_from(state, 'is_running', backward=lambda x: not x)
 
-                # Button 2: The Full Pruning Rollout
-                ui.button(
-                    'Run Full Rollout', 
+                ui.button('Run Full Rollout', 
                     on_click=lambda: ctx.emit("iac:webhook_verified", {"pipeline_type": "rollout", "manual": True}),
-                    icon='rocket_launch', 
-                    color='emerald'
+                    icon='rocket_launch', color='emerald'
                 ).props('unelevated rounded').bind_enabled_from(state, 'is_running', backward=lambda x: not x)
 
         # --- STATUS CARDS ---
@@ -68,63 +60,87 @@ async def render_dashboard(ctx, state, engine):
                 ui.label('Last Result').classes('text-lg font-bold mb-2 text-rose-500')
                 ui.label().bind_text_from(state, 'last_deployment')
 
+        # --- ACTIVE DOCKER RUNNERS ---
+        with ui.column().classes('w-full mb-4'):
+            ui.label('Active Docker Runners').classes('text-lg font-bold text-slate-100')
+            runner_container = ui.row().classes('w-full gap-4 items-stretch min-h-[100px]')
+            
+            with ui.dialog() as runner_log_dialog, ui.card().classes(UIStyles.CARD_GLASS + ' w-full max-w-4xl h-[70vh] flex flex-col p-0'):
+                with ui.row().classes('w-full p-4 items-center justify-between border-b border-zinc-800 bg-zinc-950'):
+                    runner_dialog_title = ui.label("Runner Logs").classes('text-lg font-bold text-indigo-400')
+                    ui.button(icon='close', on_click=runner_log_dialog.close, color='zinc-600').props('flat round dense')
+                with ui.scroll_area().classes('w-full flex-grow bg-black p-4'):
+                    runner_log_content = ui.label().classes('whitespace-pre-wrap font-mono text-xs text-green-400 break-words')
+
+            def open_runner_logs(task_name):
+                runner_dialog_title.set_text(f"Live Logs: {task_name}")
+                logs = state.get("active_tasks", {}).get(task_name, {}).get("logs", [])
+                runner_log_content.set_text('\n'.join(logs) if logs else "Waiting for output...")
+                runner_log_dialog.open()
+
+            def update_runners_ui():
+                nonlocal last_active_task_keys
+                active_tasks = state.get("active_tasks", {})
+                live_tasks = {k: v for k, v in active_tasks.items() if v["status"] in ["pulling_image", "running_ansible"]}
+                current_keys = set(live_tasks.keys())
+
+                # FIX: Only clear and rebuild if the SET of tasks has changed (new one started or one finished)
+                # This prevents the UI from "blocking" or flickering every 0.5s
+                if current_keys != last_active_task_keys:
+                    runner_container.clear()
+                    last_active_task_keys = current_keys
+                    with runner_container:
+                        if not live_tasks:
+                            ui.label("No active runners. Pool is idle.").classes('text-sm text-zinc-500 italic p-4')
+                        else:
+                            for task_name, task_data in live_tasks.items():
+                                status = task_data["status"]
+                                border_color = "border-indigo-500" if status == "running_ansible" else "border-amber-500"
+                                bg_color = "bg-indigo-500/10" if status == "running_ansible" else "bg-amber-500/10"
+                                icon_name = "terminal" if status == "running_ansible" else "cloud_download"
+                                
+                                with ui.card().classes(f'{UIStyles.CARD_GLASS} flex-1 min-w-[200px] border {border_color} {bg_color} cursor-pointer transition-all hover:brightness-125').on('click', lambda t=task_name: open_runner_logs(t)):
+                                    with ui.row().classes('w-full items-center gap-2'):
+                                        ui.icon(icon_name).classes('text-xl')
+                                        ui.label(task_name).classes('font-bold truncate overflow-hidden')
+                                    
+                                    ui.label("Running..." if status == "running_ansible" else "Preparing...").classes('text-xs opacity-75 mt-2')
+                                    ui.spinner('dots', size='1em').classes('absolute bottom-2 right-2 opacity-50')
+
         # --- LIVE LOG WINDOW ---
-        with ui.card().classes(UIStyles.CARD_GLASS + ' w-full mt-4 h-96'): # Added h-96 here
-            with ui.column().classes('w-full h-full'): # Force column to fill the card
-                with ui.row().classes('w-full justify-between items-center mb-2'):
-                    ui.label('Live Execution Logs').classes('text-lg font-bold')
-                    ui.button(icon='delete_sweep', on_click=lambda: log_window.clear(), color='zinc-500').props('flat round size=sm')
-                
-                # flex-grow ensures the log takes up all remaining space in the card
-                log_window = ui.log(max_lines=1000).classes('w-full flex-grow bg-zinc-950 text-green-400 font-mono text-xs p-4 rounded border border-zinc-800')
+        with ui.card().classes(UIStyles.CARD_GLASS + ' w-full mt-4 h-96'):
+            log_window = ui.log(max_lines=10000).classes('w-full h-full bg-zinc-950 text-green-400 font-mono text-xs p-4 rounded border border-zinc-800')
 
         # --- HISTORY SECTION ---
         ui.separator().classes('mt-4 mb-2 w-full opacity-50')
-        ui.label("Execution History").classes('text-2xl font-bold dark:text-zinc-100')
+        with ui.row().classes('w-full justify-between items-center'):
+            ui.label("Execution History").classes('text-2xl font-bold dark:text-zinc-100')
+            ui.button(icon='refresh', on_click=lambda: refresh_history()).props('flat round color=zinc-500')
 
         with ui.dialog() as log_dialog:
-            # Changed 'flex-col' and 'no-wrap' to ensure the log doesn't push the close button away
-            with ui.card().classes('w-full max-w-5xl h-[80vh] flex flex-col no-wrap bg-zinc-900 border border-zinc-700 p-0'):
-                # Header inside a fixed-height row
-                with ui.row().classes('w-full p-4 items-center justify-between border-b border-zinc-800'):
+            with ui.card().classes('w-full max-w-6xl h-[85vh] flex flex-col no-wrap bg-zinc-900 border border-zinc-700 p-0'):
+                with ui.row().classes('w-full p-4 items-center justify-between border-b border-zinc-800 bg-zinc-950'):
                     dialog_title = ui.label("Job Logs").classes('text-lg font-bold text-slate-200')
+                    ui.button(icon='close', on_click=log_dialog.close, color='zinc-600').props('flat round dense')
+                with ui.scroll_area().classes('w-full flex-grow bg-black p-4'):
+                    log_content = ui.label().classes('whitespace-pre-wrap font-mono text-xs text-green-400 break-words')
                 
-                # Log content in a flex-grow area
-                # Added 'overflow-hidden' to the log component classes to force its internal scrollbar
-                log_content = ui.log(max_lines=5000).classes('w-full flex-grow bg-black text-green-400 p-4 font-mono text-xs overflow-hidden')
-                
-                # Footer inside a fixed-height row
-                with ui.row().classes('w-full p-4 justify-end border-t border-zinc-800'):
-                    ui.button("Close", on_click=log_dialog.close, color='red').props('unelevated rounded')
         def open_log_popup(e):
             job_data = e.args
-            job_id = job_data.get('id')
-            status = job_data.get('status', 'UNKNOWN')
-            
-            dialog_title.set_text(f"Execution Logs: Job #{job_id} ({status})")
-            
-            # CLEAR AND PUSH
-            log_content.clear()
-            logs = engine.db.get_job_logs(job_id)
-            
-            if not logs:
-                log_content.push("No logs found for this job.")
-            else:
-                # Combine all logs into one push if possible, or iterate
-                # If logs is a single string with newlines, split it
-                if isinstance(logs, str):
-                    logs = logs.splitlines()
-                    
-                for line in logs:
-                    log_content.push(line)
-                    
+            dialog_title.set_text(f"Job #{job_data.get('id')} ({job_data.get('status')})")
+            raw_logs = engine.db.get_job_logs(job_data.get('id'))
+            if raw_logs:
+                try:
+                    parsed = json.loads(raw_logs)
+                    log_content.set_text('\n'.join(parsed) if isinstance(parsed, list) else str(parsed))
+                except: log_content.set_text(str(raw_logs))
+            else: log_content.set_text("No logs.")
             log_dialog.open()
 
         columns = [
-            {'name': 'id', 'label': 'Job ID', 'field': 'id', 'sortable': True, 'align': 'left'},
+            {'name': 'id', 'label': 'ID', 'field': 'id', 'sortable': True, 'align': 'left'},
             {'name': 'pipeline_type', 'label': 'Type', 'field': 'pipeline_type', 'align': 'left'},
             {'name': 'start_time', 'label': 'Started At', 'field': 'start_time', 'align': 'left'},
-            {'name': 'end_time', 'label': 'Finished At', 'field': 'end_time', 'align': 'left'},
             {'name': 'status', 'label': 'Status', 'field': 'status', 'align': 'left'},
             {'name': 'action', 'label': 'Logs', 'field': 'action', 'align': 'center'}
         ]
@@ -134,30 +150,39 @@ async def render_dashboard(ctx, state, engine):
         history_table.add_slot('body-cell-action', '''<q-td :props="props"><q-btn size="sm" color="info" icon="article" label="View" @click="() => $parent.$emit('view_logs', props.row)" /></q-td>''')
         history_table.on('view_logs', open_log_popup)
 
-        is_currently_running = [state.get("is_running", False)]
-        last_log_index = [0] # Acts as our bookmark
+        def refresh_history():
+            history_table.rows = engine.db.get_recent_jobs()
+            history_table.update()
+
+        last_log_index = [0]
+        history_refresh_counter = [0]
         
-        def update_ui_logs():
+        def update_ui_loop():
             current_logs = state.get("latest_logs", [])
             
-            # Detect if a NEW pipeline started (the engine reset the list)
+            # 1. Update Global Logs
             if len(current_logs) < last_log_index[0]:
                 last_log_index[0] = 0
-                log_window.clear() # Clear the UI for the new run
-
-            # If the list has grown past our bookmark, grab the new chunk
+                log_window.clear()
             if len(current_logs) > last_log_index[0]:
                 new_lines = current_logs[last_log_index[0]:]
-                last_log_index[0] = len(current_logs) # Move the bookmark forward
-                
-                # Push the chunk to the UI (No destructive clear!)
+                last_log_index[0] = len(current_logs)
                 log_window.push('\n'.join(new_lines))
             
-            # Update history table only when status changes
-            current_running = state.get("is_running", False)
-            if is_currently_running[0] != current_running:
-                history_table.rows = engine.db.get_recent_jobs()
-                history_table.update()
-                is_currently_running[0] = current_running
+            # 2. Update Active Runners (Uses internal check to avoid flicker)
+            update_runners_ui()
+            
+            # 3. Update History Table (Refresh every 5 ticks while running, or every 20 when idle)
+            history_refresh_counter[0] += 1
+            threshold = 5 if state.get("is_running") else 20
+            if history_refresh_counter[0] >= threshold:
+                refresh_history()
+                history_refresh_counter[0] = 0
+
+            # 4. Live update of OPEN runner dialog
+            if runner_log_dialog.value: 
+                current_task = runner_dialog_title.text.replace("Live Logs: ", "")
+                task_logs = state.get("active_tasks", {}).get(current_task, {}).get("logs", [])
+                runner_log_content.set_text('\n'.join(task_logs))
         
-        ui.timer(0.3, update_ui_logs) # Slightly faster polling for a "live" feel
+        ui.timer(0.5, update_ui_loop)

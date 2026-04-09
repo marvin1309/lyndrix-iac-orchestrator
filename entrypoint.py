@@ -6,10 +6,10 @@ from .api import iac_api_router, init_api
 from .engine import DeploymentEngine
 from .ui_dashboard import render_dashboard
 from .ui_settings import render_settings_ui as modular_settings_ui
-from .api import iac_api_router, init_api
 from .database import JobDatabase
 from .models import IaCJob
 from core.components.database.logic.db_service import db_instance
+
 # ==========================================
 # 1. MANIFEST
 # ==========================================
@@ -23,7 +23,7 @@ manifest = ModuleManifest(
     type="PLUGIN",
     ui_route="/iac",
     permissions={
-        "subscribe": ["vault:ready_for_data", "iac:webhook_verified", "git:status_update"], 
+        "subscribe": ["vault:ready_for_data", "iac:webhook_verified", "git:status_update", "db:connected"], 
         "emit": ["iac:pipeline_started", "iac:webhook_verified", "git:sync", "git:commit_push"]
     }
 )
@@ -35,7 +35,8 @@ plugin_state = {
     "auto_apply_enabled": False,
     "last_deployment": "Never",
     "latest_logs": [],
-    "is_running": False
+    "is_running": False,
+    "active_tasks": {}
 }
 
 # ==========================================
@@ -47,7 +48,6 @@ async def setup(ctx):
     init_api(ctx, engine)
     
     # Attach router to NiceGUI
-    from nicegui import app as nicegui_app
     nicegui_app.include_router(iac_api_router)
     
     def init_db_tables():
@@ -68,10 +68,21 @@ async def setup(ctx):
     async def on_webhook(payload):
         asyncio.create_task(engine.run_pipeline(payload))
         
-    @nicegui_app.on_startup
+    # --- THE SAFE RECONCILIATION LOOP ---
     async def run_reconciliation():
+        await asyncio.sleep(2) # Give the DB a moment to wake up
         ctx.log.info("IaC Orchestrator: Checking for surviving Docker runners...")
         await engine.reconcile_orphaned_runners()
+
+        # Resume any pending tasks in the database queue
+        interrupted_jobs = job_db.get_jobs_by_status("RUNNING")
+        for job in interrupted_jobs:
+            remaining_services = job_db.get_pending_tasks(job.id)
+            if remaining_services:
+                asyncio.create_task(engine.resume_bulk_rollout(job.id, remaining_services))
+
+    # Spawn it instantly in the background
+    asyncio.create_task(run_reconciliation())
         
     @ui.page('/iac')
     @main_layout('IaC Orchestrator')
@@ -85,16 +96,15 @@ def render_settings_ui(ctx):
     """
     modular_settings_ui(ctx, plugin_state)
     
+# --- RESTORED CORE PLUGIN CLASS ---
 class IaCOrchestratorPlugin:
     def __init__(self, ctx):
         self.ctx = ctx
         self.job_db = JobDatabase()
         self.engine = DeploymentEngine(ctx, plugin_state, self.job_db)
         
-        # 1. Initialize the API with the engine instance
+        # Initialize the API with the engine instance
         init_api(ctx, self.engine)
         
-        # 2. Inject the router into the main Lyndrix FastAPI app
-        # This assumes your 'ctx' has a reference to the core FastAPI 'app'
+        # Inject the router into the main Lyndrix FastAPI app
         ctx.app.include_router(iac_api_router)
-    

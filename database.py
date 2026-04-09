@@ -26,7 +26,10 @@ class JobDatabase:
             new_job = IaCJob(
                 pipeline_type=pipeline_type,
                 status="RUNNING",
-                logs="[]"
+                progress=0,                      # NEW
+                current_step="Pending Start",    # NEW
+                logs="[]",
+                pending_tasks="[]" 
             )
             session.add(new_job)
             session.commit()
@@ -40,8 +43,9 @@ class JobDatabase:
             if session:
                 session.close()
 
-    def update_job(self, job_id: int, status: str, logs_list: list):
-        """Saves the final status and full log array to the database."""
+    # Changed signature to remove logs_list
+    def update_job(self, job_id: int, status: str):
+        """Saves the final status to the database."""
         if job_id == -1:
             return
 
@@ -53,8 +57,9 @@ class JobDatabase:
             job = session.query(IaCJob).filter(IaCJob.id == job_id).first()
             if job:
                 job.status = status
-                job.end_time = datetime.now()
-                job.logs = json.dumps(logs_list)
+                if status in ["SUCCESS", "FAILED", "ERROR", "ABORTED"]: # Added ABORTED for the Kill Switch
+                    job.end_time = datetime.now()
+                    job.progress = 100 if status == "SUCCESS" else job.progress # Snap to 100% on success
                 session.commit()
         except Exception as e:
             log.error(f"Failed to update job {job_id} in DB: {e}")
@@ -64,7 +69,7 @@ class JobDatabase:
                 session.close()
 
     def get_recent_jobs(self, limit: int = 20) -> list:
-        """Fetches metadata for the UI table (excluding the heavy logs text)."""
+        """Fetches metadata for the UI table."""
         session = self._get_session()
         if not session:
             return []
@@ -84,7 +89,7 @@ class JobDatabase:
                     "pipeline_type": job.pipeline_type,
                     "status": job.status,
                     "start_time": job.start_time.strftime("%Y-%m-%d %H:%M:%S") if job.start_time else "N/A",
-                    "end_time": job.end_time.strftime("%Y-%m-%d %H:%M:%S") if job.end_time else "Running"
+                    "end_time": job.end_time.strftime("%H:%M:%S") if job.end_time else "Running"
                 }
                 for job in jobs
             ]
@@ -106,24 +111,76 @@ class JobDatabase:
         finally:
             if session:
                 session.close()
-                
+
     def update_pending_tasks(self, job_id: int, pending_list: list):
-        if not self.SessionLocal: return
-        with self.SessionLocal() as session:
+        """Updates the queue of services yet to be deployed."""
+        session = self._get_session()
+        if not session:
+            return
+
+        try:
             job = session.query(IaCJob).filter(IaCJob.id == job_id).first()
             if job:
-                import json
                 job.pending_tasks = json.dumps(pending_list)
                 session.commit()
+        except Exception as e:
+            log.error(f"Failed to update pending tasks for {job_id}: {e}")
+            session.rollback()
+        finally:
+            if session:
+                session.close()
 
     def get_pending_tasks(self, job_id: int) -> list:
-        if not self.SessionLocal: return []
-        with self.SessionLocal() as session:
+        """Retrieves the surviving queue list for a specific job."""
+        session = self._get_session()
+        if not session:
+            return []
+
+        try:
             job = session.query(IaCJob).filter(IaCJob.id == job_id).first()
             if job and job.pending_tasks:
-                import json
-                try:
-                    return json.loads(job.pending_tasks)
-                except Exception:
-                    pass
+                return json.loads(job.pending_tasks)
             return []
+        finally:
+            if session:
+                session.close()
+
+    # ==========================================
+    # THE MISSING METHOD THAT CAUSED THE CRASH
+    # ==========================================
+    def get_jobs_by_status(self, status: str) -> list:
+        """Finds all jobs currently in a specific state (e.g., RUNNING)."""
+        session = self._get_session()
+        if not session:
+            return []
+
+        try:
+            return session.query(IaCJob).filter(IaCJob.status == status).all()
+        except Exception as e:
+            log.error(f"Failed to fetch jobs by status '{status}': {e}")
+            return []
+        finally:
+            if session:
+                session.close()
+                
+                
+    def update_progress(self, job_id: int, progress: int = None, current_step: str = None):
+        """Live updates the progress bar and current action text."""
+        session = self._get_session()
+        if not session or job_id == -1:
+            return
+
+        try:
+            job = session.query(IaCJob).filter(IaCJob.id == job_id).first()
+            if job:
+                if progress is not None: 
+                    job.progress = progress
+                if current_step:
+                    job.current_step = str(current_step)[:250] 
+                session.commit()
+        except Exception as e:
+            log.error(f"Failed to update progress for job {job_id}: {e}")
+            session.rollback()
+        finally:
+            if session:
+                session.close()
