@@ -40,6 +40,8 @@ def render_settings_ui(ctx, state):
         {"slug": "config_engine", "label": "Configuration Engine (Ansible)"},
         {"slug": "inventory_state", "label": "Inventory State (Generated Output)"},
         {"slug": "aac_factory", "label": "AaC Factory (App Templates)"},
+        # ADD THIS NEW ROLE FOR SERVICE AUTHENTICATION:
+        {"slug": "service_repos", "label": "Application Services (Default Auth)"},
     ]
 
     def save_repo_config(slug, url, token_key):
