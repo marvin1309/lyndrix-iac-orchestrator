@@ -184,3 +184,25 @@ class JobDatabase:
         finally:
             if session:
                 session.close()
+                
+    def get_service_history(self, service_name: str, limit: int = 15) -> list:
+        """Fetches recent jobs involving a specific service with strict filtering."""
+        session = self._get_session()
+        if not session: return []
+        try:
+            # Search for the service name in the type string OR inside the pending_tasks JSON blob
+            search = f"%{service_name}%"
+            jobs = session.query(IaCJob).filter(
+                (IaCJob.pipeline_type.like(search)) | 
+                (IaCJob.pending_tasks.like(search))
+            ).order_by(IaCJob.id.desc()).limit(limit).all()
+
+            return [{
+                "id": j.id,
+                "pipeline_type": j.pipeline_type,
+                "status": j.status,
+                "progress": j.progress or 0,
+                "start_time": j.start_time.strftime("%Y-%m-%d %H:%M:%S") if j.start_time else "N/A"
+            } for j in jobs]
+        finally:
+            if session: session.close()

@@ -40,26 +40,39 @@ plugin_state = {
 }
 
 # ==========================================
-# 3. SETUP (The Glue)
+# 3. SETTINGS INJECTION
+# ==========================================
+def render_settings_ui(ctx):
+    """Glue function for settings injection."""
+    modular_settings_ui(ctx, plugin_state)
+
+# ==========================================
+# 4. PLUGIN BOOT SEQUENCE
 # ==========================================
 async def setup(ctx):
+    ctx.log.info("IaC Orchestrator: Executing async setup sequence...")
+    
     job_db = JobDatabase()
     engine = DeploymentEngine(ctx, plugin_state, job_db)
+    
+    # Initialize the API with the engine instance
     init_api(ctx, engine)
     
-    # Attach router to NiceGUI
+    # Attach router to NiceGUI directly (Fixes the previous ctx.app crash)
     nicegui_app.include_router(iac_api_router)
     
     def init_db_tables():
-        ctx.log.info("IaC Orchestrator: Verifying database tables...")
-        try:
-            IaCJob.__table__.create(bind=db_instance.engine, checkfirst=True)
-        except Exception as e:
-            ctx.log.error(f"Failed to create tables: {e}")
+        if db_instance.is_connected and db_instance.engine:
+            ctx.log.info("IaC Orchestrator: Verifying database tables...")
+            try:
+                IaCJob.__table__.create(bind=db_instance.engine, checkfirst=True)
+            except Exception as e:
+                ctx.log.error(f"Failed to create tables: {e}")
 
-    if db_instance.is_connected and db_instance.engine:
-        init_db_tables()
+    # Initial DB Check
+    init_db_tables()
 
+    # --- EVENT SUBSCRIPTIONS ---
     @ctx.subscribe('db:connected')
     async def on_db_connected(payload):
         init_db_tables()
@@ -68,7 +81,7 @@ async def setup(ctx):
     async def on_webhook(payload):
         asyncio.create_task(engine.run_pipeline(payload))
         
-    # --- THE SAFE RECONCILIATION LOOP ---
+    # --- START RECONCILIATION ---
     async def run_reconciliation():
         await asyncio.sleep(2) # Give the DB a moment to wake up
         ctx.log.info("IaC Orchestrator: Checking for surviving Docker runners...")
@@ -81,30 +94,13 @@ async def setup(ctx):
             if remaining_services:
                 asyncio.create_task(engine.resume_bulk_rollout(job.id, remaining_services))
 
-    # Spawn it instantly in the background
+    # Spawn reconciliation instantly in the background
     asyncio.create_task(run_reconciliation())
         
+    # --- REGISTER UI ROUTE ---
+    # Because this is inside setup(), it acts as a closure and permanently locks 
+    # the 'ctx' and 'engine' instances to the route, surviving any hot-reloads.
     @ui.page('/iac')
     @main_layout('IaC Orchestrator')
     async def dashboard_page():
         await render_dashboard(ctx, plugin_state, engine)
-
-def render_settings_ui(ctx):
-    """
-    Glue function: The Core calls this with 'ctx', 
-    and we inject the 'plugin_state' from this module.
-    """
-    modular_settings_ui(ctx, plugin_state)
-    
-# --- RESTORED CORE PLUGIN CLASS ---
-class IaCOrchestratorPlugin:
-    def __init__(self, ctx):
-        self.ctx = ctx
-        self.job_db = JobDatabase()
-        self.engine = DeploymentEngine(ctx, plugin_state, self.job_db)
-        
-        # Initialize the API with the engine instance
-        init_api(ctx, self.engine)
-        
-        # Inject the router into the main Lyndrix FastAPI app
-        ctx.app.include_router(iac_api_router)

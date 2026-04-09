@@ -489,7 +489,12 @@ class DeploymentEngine:
                 payload.update({"pipeline_type": "single_service", "service_name": name, "service_branch": ref.replace("refs/heads/", "")})
 
         pipeline_type = payload.get("pipeline_type", "connectivity")
-        current_job_id = self.db.create_job(pipeline_type)
+        # Better tagging for filtering
+        db_type = pipeline_type
+        if pipeline_type == "single_service":
+            db_type = f"single_service:{payload.get('service_name')}"
+            
+        current_job_id = self.db.create_job(db_type)
         
         # FILE LOGGING SETUP
         bridge = JobFileLogBridge(current_job_id)
@@ -678,7 +683,11 @@ class DeploymentEngine:
         if not shutil.which("docker"): return False, {"successful_hosts": 0, "failed_hosts": 0}
 
         if "active_tasks" not in self.state: self.state["active_tasks"] = {}
-        self.state["active_tasks"][task_name] = {"status": "pulling_image", "logs": []}
+        self.state["active_tasks"][task_name] = {
+            "status": "pulling_image", 
+            "logs": [],
+            "job_id": job_id 
+}
 
         reg_url, reg_user, reg_token = self.ctx.get_secret("ansible_registry_url"), self.ctx.get_secret("ansible_registry_user"), self.ctx.get_secret("ansible_registry_token")
         if reg_url and reg_user and reg_token:
