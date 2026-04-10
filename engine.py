@@ -687,7 +687,7 @@ class DeploymentEngine:
             "status": "pulling_image", 
             "logs": [],
             "job_id": job_id 
-}
+        }
 
         reg_url, reg_user, reg_token = self.ctx.get_secret("ansible_registry_url"), self.ctx.get_secret("ansible_registry_user"), self.ctx.get_secret("ansible_registry_token")
         if reg_url and reg_user and reg_token:

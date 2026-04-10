@@ -6,10 +6,11 @@ from nicegui import ui
 from ui.layout import main_layout 
 from ui.theme import UIStyles
 
+DOCKER_ICON = 'svg:M6.1,10L0,10.1V13h6.1V10z M13.1,10H7v3h6.1V10z M20.1,10H14v3h6.1V10z M13.1,3H7v3h6.1V3z'
+
 async def render_dashboard(ctx, state, engine):
-    last_active_task_keys = set()
-    
-    # --- HELPER: Load Catalog ---
+    active_job_cards = {} 
+
     def load_catalog():
         catalog_path = Path("/data/storage/git_repos/iac_controller/environments/global/02_service_catalog.yml")
         if catalog_path.exists():
@@ -20,7 +21,70 @@ async def render_dashboard(ctx, state, engine):
             except Exception as e: ctx.log.error(f"UI: Failed to parse catalog: {e}")
         return []
 
-    # --- HELPER: Kill Switch ---
+    def load_assignments():
+        assignments = []
+        base_dir = Path("/data/storage/git_repos/iac_controller/environments")
+        sites_dir = base_dir / "sites"
+        profiles_file = base_dir / "global" / "03_profiles.yml"
+        
+        # 1. Load Profiles
+        profiles = {}
+        if profiles_file.exists():
+            try:
+                with open(profiles_file, 'r') as f:
+                    p_data = yaml.safe_load(f) or {}
+                    profiles = p_data.get("profiles") or {}
+            except Exception as e:
+                ctx.log.error(f"UI: Failed to parse profiles YAML: {e}")
+
+        if not sites_dir.exists(): return []
+
+        # 2. Parse Hosts
+        for yaml_file in sites_dir.rglob("*.yml"):
+            parts = yaml_file.parts
+            try:
+                site = parts[parts.index("sites") + 1]
+                stage = parts[parts.index("stages") + 1] if "stages" in parts else "common"
+                
+                with open(yaml_file, 'r') as f:
+                    data = yaml.safe_load(f) or {}
+                    
+                    hosts_data = data.get("hosts") or {}
+                    hw_hosts_data = data.get("hardware_hosts") or {}
+                    all_hosts = {**hosts_data, **hw_hosts_data}
+                    
+                    for host_name, host_data in all_hosts.items():
+                        if not isinstance(host_data, dict): continue
+                        
+                        host_svcs = set()
+                        
+                        # Parse direct services
+                        direct_services = host_data.get("services") or []
+                        if isinstance(direct_services, list):
+                            for s in direct_services:
+                                if isinstance(s, dict) and s.get("name"): host_svcs.add(s.get("name"))
+                                
+                        # Parse profile-inherited services
+                        host_profiles = host_data.get("profiles") or []
+                        if isinstance(host_profiles, list):
+                            for p in host_profiles:
+                                profile_services = profiles.get(p, {}).get("services") or []
+                                if isinstance(profile_services, list):
+                                    for s in profile_services:
+                                        if isinstance(s, dict) and s.get("name"): host_svcs.add(s.get("name"))
+                                    
+                        if host_svcs:
+                            assignments.append({"site": site, "stage": stage, "host": host_name, "services": sorted(list(host_svcs))})
+                            
+            except (ValueError, IndexError):
+                continue
+            except Exception as e:
+                ctx.log.error(f"UI: Failed to parse assignment YAML {yaml_file}: {e}")
+                
+        # Deduplicate and sort by site > stage > host
+        unique_assignments = {f"{a['site']}-{a['stage']}-{a['host']}": a for a in assignments}
+        return sorted(unique_assignments.values(), key=lambda x: (x['site'], x['stage'], x['host']))
+
     async def abort_execution():
         ctx.log.warning("UI: ABORT SEQUENCE INITIATED BY USER.")
         ui.notify("Aborting execution and destroying runner containers...", type="negative")
@@ -39,289 +103,255 @@ async def render_dashboard(ctx, state, engine):
         state["active_tasks"] = {}
         ui.notify("Execution Aborted Successfully.", type="info")
 
-    # --- HELPER: Auto-Pull Repos ---
-    async def sync_catalog_repos():
-        ui.notify("Starting background sync for all catalog services...", type="info")
-        from .engine import SyncAllServicesStage
-        async def bg_sync():
-            stage = SyncAllServicesStage()
-            res = await stage.run(engine, {})
-            ui.notify(res.message, type="positive" if res.success else "negative")
-        asyncio.create_task(bg_sync())
+    with ui.dialog() as log_viewer, ui.card().classes('w-full max-w-5xl h-[80vh] bg-black p-0 border border-zinc-800 flex flex-col no-wrap'):
+        with ui.row().classes('w-full p-4 justify-between items-center border-b border-zinc-800 bg-zinc-900'):
+            log_title = ui.label("Live Stream").classes('text-indigo-400 font-bold')
+            ui.button(icon='close', on_click=log_viewer.close).props('flat round dense color=zinc-500')
+        with ui.scroll_area().classes('w-full flex-grow bg-black p-4'):
+            log_stream = ui.label().classes('whitespace-pre-wrap font-mono text-[11px] text-green-500 break-words')
+
+    def open_live_logs(job_id):
+        log_title.set_text(f"Live Pipeline Logs: Job #{job_id}")
+        log_stream.set_text("Loading...")
+        log_path = Path(f"/data/storage/logs/job_{job_id}.log")
+        if log_path.exists():
+            with open(log_path, 'r', encoding='utf-8', errors='replace') as f:
+                f.seek(0, 2)
+                file_size = f.tell()
+                if file_size > 1048576:
+                    f.seek(file_size - 100000)
+                    content = f.read()
+                    log_stream.set_text("[TRUNCATED] Showing last 100kb of logs...\n\n" + content)
+                else:
+                    f.seek(0)
+                    log_stream.set_text(f.read())
+        else:
+            log_stream.set_text("No log file found on disk. (Legacy job or delayed write)")
+        log_viewer.open()
 
     with ui.column().classes('w-full gap-6'):
-        
-        # --- HEADER & TRIGGERS ---
         with ui.row().classes('w-full justify-between items-center'):
             ui.label('GitOps Dashboard').classes(UIStyles.TITLE_H2)
-            
             with ui.row().classes('gap-3'):
-                ui.button('Test Connectivity', on_click=lambda: ctx.emit("iac:webhook_verified", {"pipeline_type": "connectivity", "manual": True}), icon='cable', color='blue-6').props('unelevated rounded').bind_enabled_from(state, 'is_running', backward=lambda x: not x)
+                ui.button('Test Connect', on_click=lambda: ctx.emit("iac:webhook_verified", {"pipeline_type": "connectivity", "manual": True}), icon='cable', color='blue-6').props('unelevated rounded size=sm').bind_enabled_from(state, 'is_running', backward=lambda x: not x)
+                ui.button('Deploy Service', on_click=lambda: ui.notify("Use the Service Catalog tab for targeted deploys", type="info"), icon='rocket', color='indigo-500').props('unelevated rounded size=sm').bind_enabled_from(state, 'is_running', backward=lambda x: not x)
+                ui.button('Run Rollout', on_click=lambda: ctx.emit("iac:webhook_verified", {"pipeline_type": "rollout", "manual": True}), icon='rocket_launch', color='emerald').props('unelevated rounded size=sm').bind_enabled_from(state, 'is_running', backward=lambda x: not x)
+                ui.button('ABORT', on_click=abort_execution, icon='dangerous', color='red-6').props('unelevated rounded size=sm').bind_visibility_from(state, 'is_running')
 
-                def open_single_service_dialog():
-                    with ui.dialog() as dialog, ui.card().classes(f'{UIStyles.CARD_GLASS} min-w-[300px] border border-zinc-700'):
-                        ui.label('Deploy Single Service').classes('text-lg font-bold text-slate-100 mb-2')
-                        svc_name_input = ui.input('Service Name').classes('w-full').props('outlined dense')
-                        svc_branch_input = ui.input('Branch', value='main').classes('w-full mt-2').props('outlined dense')
-                        
-                        def trigger_deploy():
-                            if not svc_name_input.value:
-                                ui.notify("Service Name is required", type="negative")
-                                return
-                            ctx.emit("iac:webhook_verified", {"pipeline_type": "single_service", "service_name": svc_name_input.value.strip(), "service_branch": svc_branch_input.value.strip(), "manual": True})
-                            dialog.close()
-                            
-                        with ui.row().classes('w-full justify-end mt-4 gap-2'):
-                            ui.button('Cancel', on_click=dialog.close, color='zinc-500').props('flat rounded')
-                            ui.button('Trigger Deploy', on_click=trigger_deploy, color='indigo').props('unelevated rounded')
-                    dialog.open()
-
-                ui.button('Deploy Service', on_click=open_single_service_dialog, icon='rocket', color='indigo-500').props('unelevated rounded').bind_enabled_from(state, 'is_running', backward=lambda x: not x)
-                ui.button('Run Full Rollout', on_click=lambda: ctx.emit("iac:webhook_verified", {"pipeline_type": "rollout", "manual": True}), icon='rocket_launch', color='emerald').props('unelevated rounded').bind_enabled_from(state, 'is_running', backward=lambda x: not x)
-                ui.button('ABORT', on_click=abort_execution, icon='dangerous', color='red-6').props('unelevated rounded').bind_visibility_from(state, 'is_running')
-
-        # --- SUBNAVIGATION TABS ---
-        with ui.tabs().classes('w-full') as tabs:
+        with ui.tabs().classes('w-full border-b border-zinc-800') as tabs:
             overview_tab = ui.tab('Overview', icon='dashboard')
             catalog_tab = ui.tab('Service Catalog', icon='apps')
+            assignment_tab = ui.tab('Assignments', icon='account_tree')
             history_tab = ui.tab('History & Logs', icon='history')
 
         with ui.tab_panels(tabs, value=overview_tab).classes('w-full bg-transparent p-0'):
             
-            # ==========================================
-            # TAB 1: OVERVIEW 
-            # ==========================================
-            with ui.tab_panel(overview_tab).classes('gap-6'):
+            with ui.tab_panel(overview_tab).classes('gap-6 p-4'):
+                ui.label("Active Pipelines").classes(UIStyles.TITLE_H3).bind_visibility_from(state, 'is_running')
+                jobs_grid = ui.grid(columns='repeat(auto-fill, minmax(450px, 1fr))').classes('w-full gap-4')
                 
-                with ui.row().classes('w-full gap-6 flex-col md:flex-row items-stretch'):
-                    with ui.card().classes(f'{UIStyles.CARD_GLASS} flex-1'):
-                        ui.label('Deployment Engine').classes('text-lg font-bold mb-2 text-indigo-500')
-                        ui.label().bind_text_from(state, 'is_running', backward=lambda x: "Running..." if x else "Status: Idle")
+                with ui.column().classes('w-full items-center py-32 opacity-30').bind_visibility_from(state, 'is_running', backward=lambda x: not x):
+                    ui.icon('cloud_done', size='5em')
+                    ui.label("Infrastructure is stable. No active jobs.").classes('text-xl font-bold')
+
+            with ui.tab_panel(catalog_tab).classes('gap-4 p-4'):
+                with ui.dialog() as svc_history_dialog, ui.card().classes('w-full max-w-4xl p-0 bg-zinc-950 border border-zinc-800'):
+                    with ui.row().classes('p-4 w-full justify-between items-center border-b border-zinc-800'):
+                        svc_history_title = ui.label("").classes('text-lg font-bold text-indigo-400')
+                        ui.button(icon='close', on_click=svc_history_dialog.close).props('flat round dense color=zinc-500')
+                    svc_history_table = ui.table(columns=[
+                        {'name': 'id', 'label': 'Job ID', 'field': 'id', 'align': 'left'},
+                        {'name': 'start_time', 'label': 'Date', 'field': 'start_time', 'align': 'left'},
+                        {'name': 'status', 'label': 'Status', 'field': 'status', 'align': 'left'},
+                        {'name': 'action', 'label': 'Log', 'field': 'action', 'align': 'center'}
+                    ], rows=[], row_key='id').classes('w-full bg-transparent shadow-none')
+                    svc_history_table.add_slot('body-cell-status', '''<q-td :props="props"><q-badge :color="props.value === 'SUCCESS' ? 'positive' : (props.value === 'RUNNING' ? 'warning' : 'negative')">{{props.value}}</q-badge></q-td>''')
+                    svc_history_table.add_slot('body-cell-action', '''<q-td :props="props"><q-btn size="sm" icon="article" color="primary" @click="() => $parent.$emit('view', props.row)" /></q-td>''')
+                    svc_history_table.on('view', lambda e: show_job_logs_wrapper(e.args['id']))
+
+                def show_job_logs_wrapper(jid):
+                    svc_history_dialog.close()
+                    open_live_logs(jid)
+
+                with ui.row().classes('w-full justify-between items-end mb-4'):
+                    with ui.column().classes('gap-0'):
+                        ui.label('Service Catalog').classes(UIStyles.TITLE_H3)
+                        ui.label('Available services from the global catalog.').classes(f'{UIStyles.TEXT_MUTED} text-xs')
+                    with ui.row().classes('gap-2 items-center'):
+                        catalog_search = ui.input('Search Service...').props('outlined dense clearable').classes('w-64')
+                        ui.button(icon='refresh', on_click=lambda: catalog_container.refresh()).props('flat round color=zinc-500')
+
+                @ui.refreshable
+                def catalog_container():
+                    catalog_services = load_catalog()
+                    if not catalog_services:
+                        ui.label("No services found. Ensure 'iac_controller' is synced and YAML is valid.").classes(f'{UIStyles.TEXT_MUTED} italic mt-4')
+                        return
                     
-                    with ui.card().classes(f'{UIStyles.CARD_GLASS} flex-1'):
-                        ui.label('Last Result').classes('text-lg font-bold mb-2 text-rose-500')
-                        ui.label().bind_text_from(state, 'last_deployment')
-                
-                with ui.card().classes(f'{UIStyles.CARD_GLASS} w-full').bind_visibility_from(state, 'is_running'):
-                    ui.label('Active Deployment Progress').classes(f'{UIStyles.TITLE_H3} text-indigo-400 mb-2')
-                    progress_bar = ui.linear_progress(value=0, show_value=False).props('size=15px color=indigo rounded')
-                    with ui.row().classes('w-full justify-between mt-1'):
-                        step_label = ui.label('Initializing...').classes(f'{UIStyles.TEXT_MUTED} font-mono')
-                        pct_label = ui.label('0%').classes(f'{UIStyles.TEXT_MUTED} font-bold')
-
-                with ui.column().classes('w-full mt-4'):
-                    ui.label('Active Docker Runners').classes(UIStyles.TITLE_H3)
-                    runner_container = ui.row().classes('w-full gap-4 items-stretch min-h-[100px]')
+                    catalog_grid = ui.grid(columns='repeat(auto-fill, minmax(320px, 1fr))').classes('w-full gap-4 mt-2')
                     
-                    with ui.dialog() as runner_log_dialog, ui.card().classes(f'{UIStyles.CARD_GLASS} w-full max-w-4xl h-[70vh] flex flex-col p-0'):
-                        with ui.row().classes('w-full p-4 items-center justify-between border-b border-zinc-800 bg-zinc-950'):
-                            runner_dialog_title = ui.label("Runner Logs").classes('text-lg font-bold text-indigo-400')
-                            ui.button(icon='close', on_click=runner_log_dialog.close, color='zinc-600').props('flat round dense')
-                        with ui.scroll_area().classes('w-full flex-grow bg-black p-4'):
-                            runner_log_content = ui.label().classes('whitespace-pre-wrap font-mono text-xs text-green-400 break-words')
-
-                    def open_runner_logs(task_name):
-                        runner_dialog_title.set_text(f"Live Logs: {task_name}")
-                        logs = state.get("active_tasks", {}).get(task_name, {}).get("logs", [])
-                        runner_log_content.set_text('\n'.join(logs) if logs else "Waiting for output...")
-                        runner_log_dialog.open()
-
-            # ==========================================
-            # TAB 2: SERVICE CATALOG GRID
-            # ==========================================
-            with ui.tab_panel(catalog_tab).classes('gap-4'):
-                with ui.row().classes('w-full justify-between items-center mb-4'):
-                    ui.label('Declared Infrastructure Services').classes(UIStyles.TITLE_H3)
-                    ui.button('Sync Repositories', on_click=sync_catalog_repos, icon='cloud_download', color='secondary').props('unelevated rounded size=sm')
-
-                catalog_services = load_catalog()
-                
-                # --- SERVICE HISTORY DIALOG ---
-                with ui.dialog() as svc_history_dialog, ui.card().classes(f'{UIStyles.CARD_GLASS} w-full max-w-5xl p-0'):
-                    with ui.row().classes('w-full p-4 items-center justify-between border-b border-zinc-800'):
-                        svc_history_title = ui.label("Service History").classes('text-lg font-bold text-indigo-400')
-                        ui.button(icon='close', on_click=svc_history_dialog.close, color='zinc-600').props('flat round dense')
-                    
-                    with ui.column().classes('w-full p-4'):
-                        svc_history_table = ui.table(
-                            columns=[
-                                {'name': 'id', 'label': 'Job ID', 'field': 'id', 'align': 'left'},
-                                {'name': 'pipeline_type', 'label': 'Type', 'field': 'pipeline_type', 'align': 'left'},
-                                {'name': 'start_time', 'label': 'Started', 'field': 'start_time', 'align': 'left'},
-                                {'name': 'status', 'label': 'Status', 'field': 'status', 'align': 'left'},
-                                {'name': 'action', 'label': 'Action', 'field': 'action', 'align': 'center'}
-                            ], rows=[], row_key='id'
-                        ).classes('w-full bg-transparent shadow-none')
-                        svc_history_table.add_slot('body-cell-status', '''<q-td :props="props"><q-badge :color="props.value === 'SUCCESS' ? 'positive' : (props.value === 'RUNNING' ? 'warning' : 'negative')">{{ props.value }}</q-badge></q-td>''')
-                        
-                        # Bind the existing open_log_popup function to this table too
-                        svc_history_table.add_slot('body-cell-action', '''<q-td :props="props"><q-btn size="sm" color="zinc-700" text-color="white" icon="folder_open" label="View Log" @click="() => $parent.$emit('view_logs_svc', props.row)" /></q-td>''')
-
-                def open_service_history(svc_name):
-                    svc_history_title.set_text(f"Deployment History: {svc_name}")
-                    # Fetch history specific to this service
-                    history_rows = engine.db.get_service_history(svc_name)
-                    svc_history_table.rows = history_rows
-                    svc_history_table.update()
-                    svc_history_dialog.open()
-
-                if not catalog_services:
-                    ui.label("No services found. Ensure 'iac_controller' is synced and YAML is valid.").classes(f'{UIStyles.TEXT_MUTED} italic')
-                else:
-                    with ui.grid(columns='repeat(auto-fill, minmax(320px, 1fr))').classes('w-full gap-4'):
-                        for svc in catalog_services:
-                            svc_name = svc.get("name", "Unknown")
-                            repo_name = svc.get("repository_name", svc_name)
-                            branch = svc.get("branch", "main")
-                            
-                            # Extract deployment node/host info if available in your YAML schema
-                            # (Adjust these keys if your YAML structure differs)
-                            target_node = svc.get("target_environment", svc.get("host", "Auto-Assigned"))
-                            deploy_type = svc.get("deploy_type", "Docker Compose")
-                            
-                            with ui.card().classes(f'{UIStyles.CARD_BASE} flex flex-col hover:border-indigo-500 transition-colors'):
-                                with ui.row().classes('w-full justify-between items-start'):
-                                    with ui.column().classes('gap-0'):
-                                        ui.label(svc_name).classes('text-md font-bold truncate')
-                                        ui.label(f"Repo: {repo_name}").classes(f'{UIStyles.TEXT_MUTED} text-[10px] truncate')
-                                    
-                                    # Visual Indicator for Docker Compose
-                                    if "compose" in deploy_type.lower():
-                                        ui.icon('view_in_ar', color='indigo-400').classes('text-xl').tooltip("Docker Compose")
-                                    else:
-                                        ui.icon('settings_applications', color='slate-400').classes('text-xl').tooltip(deploy_type)
-
-                                ui.separator().classes('my-2 opacity-20')
+                    def render_catalog_cards(e=None):
+                        catalog_grid.clear()
+                        term = (catalog_search.value or "").lower()
+                        with catalog_grid:
+                            for svc in catalog_services:
+                                name = svc.get("name", "Unknown")
+                                repo_name = svc.get("repository_name", name)
+                                branch = svc.get("branch", "main")
+                                target_node = svc.get("target_environment", svc.get("host", "Auto-Assigned"))
+                                deploy_type = svc.get("deploy_type", "Docker Compose")
                                 
-                                # Node & Branch Info
-                                with ui.row().classes('w-full justify-between items-center'):
-                                    with ui.row().classes('items-center gap-1'):
-                                        ui.icon('dns', size='12px').classes('text-slate-400')
-                                        ui.label(target_node).classes('text-xs text-slate-500 font-mono')
-                                    
-                                    with ui.row().classes('items-center gap-1'):
-                                        ui.icon('call_split', size='12px').classes('text-slate-400')
-                                        ui.label(branch).classes('text-xs text-slate-500 font-mono')
+                                match = not term or term in name.lower() or term in repo_name.lower() or term in target_node.lower()
                                 
-                                ui.separator().classes('mt-auto mb-3 opacity-20')
+                                if match:
+                                    with ui.card().classes(f'{UIStyles.CARD_BASE} flex flex-col hover:border-indigo-500 transition-colors'):
+                                        with ui.row().classes('w-full justify-between items-start'):
+                                            with ui.column().classes('gap-0'):
+                                                ui.label(name).classes('text-md font-bold truncate')
+                                                ui.label(f"Repo: {repo_name}").classes(f'{UIStyles.TEXT_MUTED} text-[10px] truncate')
+                                        
+                                            if "compose" in deploy_type.lower():
+                                                ui.html('<svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor"><path d="M6.1,10L0,10.1V13h6.1V10z M13.1,10H7v3h6.1V10z M20.1,10H14v3h6.1V10z M13.1,3H7v3h6.1V3z"/></svg>').classes('text-indigo-400 w-6 h-6').tooltip("Docker Compose")
+                                            else:
+                                                ui.icon('settings_applications', color='slate-400').classes('text-xl').tooltip(deploy_type)
+
+                                        ui.separator().classes('my-2 opacity-20')
+                                            
+                                        with ui.row().classes('w-full justify-between items-center'):
+                                            with ui.row().classes('items-center gap-1'):
+                                                ui.icon('dns', size='12px').classes('text-slate-400')
+                                                ui.label(target_node).classes('text-xs text-slate-500 font-mono')
+                                            
+                                            with ui.row().classes('items-center gap-1'):
+                                                ui.icon('call_split', size='12px').classes('text-slate-400')
+                                                ui.label(branch).classes('text-xs text-slate-500 font-mono')
+                                        
+                                        ui.separator().classes('mt-auto mb-3 opacity-20')
+                                        
+                                        with ui.row().classes('w-full justify-between items-center gap-2'):
+                                            ui.button(icon='history', on_click=lambda n=name: [svc_history_title.set_text(f"Deployment History: {n}"), setattr(svc_history_table, 'rows', engine.db.get_service_history(n)), svc_history_dialog.open()]).props('flat round size=sm color=zinc-500').tooltip("View Deployment History")
+                                            ui.button('Deploy', icon='rocket', on_click=lambda n=name, b=branch: ctx.emit("iac:webhook_verified", {"pipeline_type": "single_service", "service_name": n, "service_branch": b, "manual": True})).props('unelevated rounded size=sm color=indigo').bind_enabled_from(state, 'is_running', backward=lambda x: not x)
+
+                    catalog_search.on('update:model-value', render_catalog_cards)
+                    render_catalog_cards()
+
+                catalog_container()
+
+            with ui.tab_panel(assignment_tab).classes('p-4'):
+                with ui.row().classes('w-full justify-between items-end mb-4'):
+                    with ui.column().classes('gap-0'):
+                        ui.label('Infrastructure Topography').classes(UIStyles.TITLE_H3)
+                        ui.label('Flattened view of mapped services across all sites and stages.').classes(f'{UIStyles.TEXT_MUTED} text-xs')
+                    with ui.row().classes('gap-2 items-center'):
+                        search_input = ui.input('Search Host or Service...').props('outlined dense clearable').classes('w-64')
+                        ui.button(icon='refresh', on_click=lambda: assignment_container.refresh()).props('flat round color=zinc-500')
+
+                @ui.refreshable
+                def assignment_container():
+                    assignments = load_assignments()
+                    if not assignments:
+                        ui.label("No assignments found. Ensure 'iac_controller/environments' is populated.").classes(f'{UIStyles.TEXT_MUTED} italic mt-4')
+                        return
+
+                    grid = ui.grid(columns='repeat(auto-fill, minmax(350px, 1fr))').classes('w-full gap-4 mt-2')
+                    
+                    def render_cards(e=None):
+                        grid.clear()
+                        term = (search_input.value or "").lower()
+                        with grid:
+                            for item in assignments:
+                                site, stage, host, svcs = item['site'], item['stage'], item['host'], item['services']
                                 
-                                # Action Buttons
-                                with ui.row().classes('w-full justify-between items-center gap-2'):
-                                    ui.button(icon='history', color='zinc-600', on_click=lambda n=svc_name: open_service_history(n)).props('flat round size=sm').tooltip("View Deployment History")
-                                    
-                                    ui.button('Deploy', icon='rocket', color='indigo-500', on_click=lambda n=svc_name, b=branch: ctx.emit("iac:webhook_verified", {"pipeline_type": "single_service", "service_name": n, "service_branch": b, "manual": True})).props('unelevated rounded size=sm').bind_enabled_from(state, 'is_running', backward=lambda x: not x)
-
-            # ==========================================
-            # TAB 3: GLOBAL HISTORY & FILE LOGS
-            # ==========================================
-            with ui.tab_panel(history_tab).classes('gap-4 relative'):
-                ui.button(icon='refresh', on_click=lambda: refresh_history()).props('flat round color=zinc-500').classes('absolute right-4 top-4 z-10')
-
-                with ui.dialog() as log_dialog:
-                    with ui.card().classes('w-full max-w-6xl h-[85vh] flex flex-col no-wrap bg-zinc-900 border border-zinc-700 p-0'):
-                        with ui.row().classes('w-full p-4 items-center justify-between border-b border-zinc-800 bg-zinc-950'):
-                            dialog_title = ui.label("Job Logs").classes('text-lg font-bold text-slate-200')
-                            with ui.row().classes('gap-2 items-center'):
-                                log_size_label = ui.label("").classes('text-xs text-zinc-500')
-                                ui.button(icon='close', on_click=log_dialog.close, color='zinc-600').props('flat round dense')
-                        with ui.scroll_area().classes('w-full flex-grow bg-black p-4'):
-                            log_content = ui.label().classes('whitespace-pre-wrap font-mono text-xs text-green-400 break-words')
-                        
-                def open_log_popup(e):
-                    job_data = e.args
-                    job_id = job_data.get('id')
-                    dialog_title.set_text(f"Job #{job_id} Logs ({job_data.get('status')})")
+                                # Interactive search filter
+                                match = not term or term in host.lower() or term in site.lower() or term in stage.lower() or any(term in s.lower() for s in svcs)
+                                
+                                if match:
+                                    with ui.card().classes(f'{UIStyles.CARD_BASE} flex flex-col gap-2 hover:border-indigo-500/50 transition-all'):
+                                        with ui.row().classes('w-full justify-between items-center border-b border-zinc-800/50 pb-2'):
+                                            with ui.row().classes('items-center gap-2'):
+                                                ui.icon('dns', size='18px').classes('text-slate-400')
+                                                ui.label(host).classes('text-md font-bold text-slate-100 truncate max-w-[150px]').tooltip(host)
+                                            with ui.row().classes('gap-1'):
+                                                ui.chip(site.upper(), icon='domain').props('color=blue-900 text-color=blue-200 size=xs square')
+                                                ui.chip(stage.upper(), icon='layers').props('color=emerald-900 text-color=emerald-200 size=xs square')
+                                        
+                                        with ui.row().classes('gap-1.5 pt-1'):
+                                            for svc in svcs:
+                                                ui.chip(svc, icon='apps', color='zinc-800').props('text-color=slate-300 size=sm')
                     
-                    log_path = Path(f"/data/storage/logs/job_{job_id}.log")
-                    if log_path.exists():
-                        size_mb = log_path.stat().st_size / (1024 * 1024)
-                        log_size_label.set_text(f"File Size: {size_mb:.2f} MB")
-                        with open(log_path, 'r', encoding='utf-8', errors='replace') as f:
-                            f.seek(0, 2)
-                            file_size = f.tell()
-                            read_size = min(file_size, 100000)
-                            f.seek(file_size - read_size)
-                            content = f.read()
-                        prefix = "[TRUNCATED] Showing last 100kb of logs...\n\n" if file_size > 100000 else ""
-                        log_content.set_text(prefix + content)
-                    else:
-                        log_size_label.set_text("File missing")
-                        log_content.set_text(f"No log file found on disk at:\n{log_path}\n\n(This might be a legacy job stored only in the DB).")
+                    search_input.on('update:model-value', render_cards)
+                    render_cards()
                     
-                    log_dialog.open()
+                assignment_container()
 
-                # Bind the service history table's "View Log" button to the same popup function
-                svc_history_table.on('view_logs_svc', open_log_popup)
-
-                columns = [
+            with ui.tab_panel(history_tab).classes('p-4'):
+                history_table = ui.table(columns=[
                     {'name': 'id', 'label': 'ID', 'field': 'id', 'sortable': True, 'align': 'left'},
-                    {'name': 'pipeline_type', 'label': 'Type', 'field': 'pipeline_type', 'align': 'left'},
+                    {'name': 'pipeline_type', 'label': 'Pipeline Type', 'field': 'pipeline_type', 'align': 'left'},
                     {'name': 'progress', 'label': 'Progress', 'field': 'progress', 'align': 'left'},
-                    {'name': 'start_time', 'label': 'Started', 'field': 'start_time', 'align': 'left'},
-                    {'name': 'end_time', 'label': 'Finished', 'field': 'end_time', 'align': 'left'},
                     {'name': 'status', 'label': 'Status', 'field': 'status', 'align': 'left'},
-                    {'name': 'action', 'label': 'Disk Logs', 'field': 'action', 'align': 'center'}
-                ]
-
-                history_table = ui.table(columns=columns, rows=engine.db.get_recent_jobs(), row_key='id').classes(f'{UIStyles.CARD_BASE} w-full mt-12')
-                history_table.add_slot('body-cell-progress', '''<q-td :props="props"><q-linear-progress :value="(props.value || 0) / 100" color="indigo" class="mt-1" /><div class="text-xs mt-1 text-center text-slate-400">{{ props.value || 0 }}%</div></q-td>''')
-                history_table.add_slot('body-cell-status', '''<q-td :props="props"><q-badge :color="props.value === 'SUCCESS' ? 'positive' : (props.value === 'RUNNING' ? 'warning' : 'negative')">{{ props.value }}</q-badge></q-td>''')
-                history_table.add_slot('body-cell-action', '''<q-td :props="props"><q-btn size="sm" color="zinc-700" text-color="white" icon="folder_open" label="Read File" @click="() => $parent.$emit('view_logs', props.row)" /></q-td>''')
-                history_table.on('view_logs', open_log_popup)
-
-        def refresh_history():
-            history_table.rows = engine.db.get_recent_jobs()
-            history_table.update()
-
-        history_refresh_counter = [0]
+                    {'name': 'action', 'label': 'Logs', 'field': 'action', 'align': 'center'}
+                ], rows=engine.db.get_recent_jobs(), row_key='id').classes(f'{UIStyles.CARD_BASE} w-full mt-2')
+                history_table.add_slot('body-cell-progress', '''<q-td :props="props"><q-linear-progress :value="(props.value || 0)/100" color="indigo" class="mt-2"/><div class="text-center text-[10px]">{{props.value || 0}}%</div></q-td>''')
+                history_table.add_slot('body-cell-status', '''<q-td :props="props"><q-badge :color="props.value === 'SUCCESS' ? 'positive' : (props.value === 'RUNNING' ? 'warning' : 'negative')">{{props.value}}</q-badge></q-td>''')
+                history_table.add_slot('body-cell-action', '''<q-td :props="props"><q-btn size="sm" color="zinc-700" icon="folder_open" @click="() => $parent.$emit('view', props.row)" /></q-td>''')
+                history_table.on('view', lambda e: open_live_logs(e.args['id']))
         
         def update_ui_loop():
-            is_running = state.get("is_running", False)
+            running_jobs = engine.db.get_jobs_by_status("RUNNING")
+            active_ids = [j.id for j in running_jobs]
             
-            if is_running:
-                recent = engine.db.get_recent_jobs(1)
-                if recent:
-                    job = recent[0]
-                    p_val = job.get("progress", 0) or 0
-                    progress_bar.set_value(p_val / 100.0)
-                    pct_label.set_text(f"{p_val}%")
-                    step_label.set_text(job.get("current_step", "Processing..."))
-            
-            nonlocal last_active_task_keys
-            active_tasks = state.get("active_tasks", {})
-            live_tasks = {k: v for k, v in active_tasks.items() if v["status"] in ["pulling_image", "running_ansible"]}
-            current_keys = set(live_tasks.keys())
+            for jid in list(active_job_cards.keys()):
+                if jid not in active_ids:
+                    jobs_grid.remove(active_job_cards[jid]["card"])
+                    del active_job_cards[jid]
 
-            if current_keys != last_active_task_keys:
-                runner_container.clear()
-                last_active_task_keys = current_keys
-                with runner_container:
-                    if not live_tasks:
-                        ui.label("No active runners. Pool is idle.").classes(f'{UIStyles.TEXT_MUTED} italic p-4')
-                    else:
-                        for task_name, task_data in live_tasks.items():
-                            status = task_data["status"]
-                            border_color = "border-indigo-500" if status == "running_ansible" else "border-amber-500"
-                            bg_color = "bg-indigo-500/10" if status == "running_ansible" else "bg-amber-500/10"
-                            icon_name = "terminal" if status == "running_ansible" else "cloud_download"
+            with jobs_grid:
+                for job in running_jobs:
+                    if job.id not in active_job_cards:
+                        with ui.card().classes(f'{UIStyles.CARD_GLASS} border-indigo-500/50 flex flex-col p-4 shadow-2xl') as c:
+                            with ui.row().classes('w-full justify-between items-start'):
+                                with ui.column().classes('gap-0'):
+                                    ui.label(f"Pipeline #{job.id}").classes('text-lg font-bold text-indigo-400')
+                                    ui.label(job.pipeline_type).classes('text-[10px] uppercase text-slate-500 font-black tracking-widest')
+                                ui.spinner('tail', size='2em', color='indigo')
                             
-                            with ui.card().classes(f'{UIStyles.CARD_GLASS} flex-1 min-w-[200px] border {border_color} {bg_color} cursor-pointer transition-all hover:brightness-125').on('click', lambda t=task_name: open_runner_logs(t)):
-                                with ui.row().classes('w-full items-center gap-2'):
-                                    ui.icon(icon_name).classes('text-xl')
-                                    ui.label(task_name).classes('font-bold truncate overflow-hidden')
-                                
-                                ui.label("Running..." if status == "running_ansible" else "Preparing...").classes('text-xs opacity-75 mt-2')
-                                ui.spinner('dots', size='1em').classes('absolute bottom-2 right-2 opacity-50')
-            
-            history_refresh_counter[0] += 1
-            threshold = 5 if is_running else 20
-            if history_refresh_counter[0] >= threshold:
-                refresh_history()
-                history_refresh_counter[0] = 0
+                            with ui.linear_progress(value=(job.progress or 0)/100.0, show_value=False).props('color=indigo rounded stripe size=20px').classes('mt-4 relative') as p_bar:
+                                pct_lbl = ui.label(f"{int(job.progress or 0)}%").classes('absolute-center text-[11px] font-bold text-white drop-shadow-md')
+                            with ui.row().classes('w-full mt-1'):
+                                step_lbl = ui.label(job.current_step).classes('text-[11px] font-mono text-slate-300 truncate w-full')
+                            
+                            ui.label("Active Runners").classes('text-[10px] uppercase text-zinc-600 font-bold mt-4 mb-1')
+                            runner_box = ui.column().classes('w-full gap-1 p-2 bg-black/40 rounded border border-zinc-800/50')
+                            
+                            with ui.row().classes('w-full mt-4 pt-2 border-t border-zinc-800 justify-between'):
+                                ui.button('Live Logs', icon='terminal', on_click=lambda j=job.id: open_live_logs(j)).props('flat rounded size=sm color=green')
+                                ui.button('Abort', icon='stop', on_click=abort_execution).props('flat rounded size=sm color=red')
+                            
+                        active_job_cards[job.id] = {"card": c, "bar": p_bar, "step": step_lbl, "pct": pct_lbl, "runners": runner_box}
+                    else:
+                        card_meta = active_job_cards[job.id]
+                        card_meta["bar"].set_value((job.progress or 0) / 100.0)
+                        card_meta["step"].set_text(job.current_step)
+                        card_meta["pct"].set_text(f"{int(job.progress or 0)}%")
+                        
+                        card_meta["runners"].clear()
+                        any_runners = False
+                        for t_name, t_data in state.get("active_tasks", {}).items():
+                            if t_data.get("job_id") == job.id and t_data.get("status") in ["pulling_image", "running_ansible"]:
+                                any_runners = True
+                                with card_meta["runners"]:
+                                    with ui.row().classes('w-full items-center gap-2 px-1'):
+                                        ui.icon('settings_input_component', size='12px', color='amber-500')
+                                        ui.label(t_name).classes('text-[10px] text-slate-300 font-medium truncate w-4/5')
+                                        ui.spinner('dots', size='xs', color='slate-600').classes('ml-auto')
+                        
+                        if not any_runners:
+                            with card_meta["runners"]:
+                                ui.label("Waiting for pool...").classes('text-[10px] text-zinc-600 italic px-1')
 
-            if runner_log_dialog.value: 
-                current_task = runner_dialog_title.text.replace("Live Logs: ", "")
-                task_logs = state.get("active_tasks", {}).get(current_task, {}).get("logs", [])
-                runner_log_content.set_text('\n'.join(task_logs))
-        
-        ui.timer(0.5, update_ui_loop)
+            if tabs.value == 'History & Logs':
+                history_table.rows = engine.db.get_recent_jobs()
+                history_table.update()
+
+        ui.timer(1.0, update_ui_loop)

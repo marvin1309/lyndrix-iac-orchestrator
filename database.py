@@ -2,6 +2,7 @@ import json
 from datetime import datetime
 from core.logger import get_logger
 from .models import IaCJob
+from sqlalchemy import or_
 
 # Import your central database instance
 from core.components.database.logic.db_service import db_instance
@@ -80,7 +81,8 @@ class JobDatabase:
                 IaCJob.pipeline_type,
                 IaCJob.start_time,
                 IaCJob.end_time,
-                IaCJob.status
+                IaCJob.status,
+                IaCJob.progress
             ).order_by(IaCJob.id.desc()).limit(limit).all()
 
             return [
@@ -88,6 +90,7 @@ class JobDatabase:
                     "id": job.id,
                     "pipeline_type": job.pipeline_type,
                     "status": job.status,
+                    "progress": job.progress or 0,
                     "start_time": job.start_time.strftime("%Y-%m-%d %H:%M:%S") if job.start_time else "N/A",
                     "end_time": job.end_time.strftime("%H:%M:%S") if job.end_time else "Running"
                 }
@@ -193,8 +196,7 @@ class JobDatabase:
             # Search for the service name in the type string OR inside the pending_tasks JSON blob
             search = f"%{service_name}%"
             jobs = session.query(IaCJob).filter(
-                (IaCJob.pipeline_type.like(search)) | 
-                (IaCJob.pending_tasks.like(search))
+                or_(IaCJob.pipeline_type.like(search), IaCJob.pending_tasks.like(search))
             ).order_by(IaCJob.id.desc()).limit(limit).all()
 
             return [{
