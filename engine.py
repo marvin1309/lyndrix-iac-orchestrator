@@ -716,7 +716,7 @@ class DeploymentEngine:
             await asyncio.create_subprocess_exec("docker", "rm", "-f", c_name, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
 
             cmd = [
-                "docker", "run", "-d", "--name", c_name, "--pull", "missing",
+                "docker", "run", "-d", "--name", c_name, "--pull", "always",
                 "--label", f"iac_job_id={job_id}", "--label", f"iac_task_name={task_name}",
                 "-e", f"IAC_JOB_ID={job_id}",
                 "-v", f"{h_git}:/data/storage/git_repos", "-v", f"{h_svc}:/data/storage/services", "-v", f"{h_sec}/{key_filename}:/root/.ssh/id_rsa:ro",
