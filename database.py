@@ -1,7 +1,7 @@
 import json
 from datetime import datetime
 from core.logger import get_logger
-from .models import IaCJob
+from .models import IaCJob, IaCState
 from sqlalchemy import or_
 
 # Import your central database instance
@@ -165,6 +165,47 @@ class JobDatabase:
         finally:
             if session:
                 session.close()
+
+    # --- NEW STATE MANAGEMENT METHODS ---
+
+    def get_state(self, state_id: str) -> dict:
+        """Fetches and decodes a state snapshot from the database."""
+        session = self._get_session()
+        if not session: return None
+        try:
+            state_record = session.query(IaCState).filter(IaCState.id == state_id).first()
+            if state_record and state_record.state_data:
+                return {
+                    "data": json.loads(state_record.state_data),
+                    "commit_hash": state_record.commit_hash
+                }
+            return None
+        except Exception as e:
+            log.error(f"Failed to get state '{state_id}': {e}")
+            return None
+        finally:
+            if session: session.close()
+
+    def update_state(self, state_id: str, new_state_data: dict, commit_hash: str):
+        """Creates or updates a state snapshot in the database."""
+        session = self._get_session()
+        if not session: return
+        try:
+            state_record = session.query(IaCState).filter(IaCState.id == state_id).first()
+            encoded_data = json.dumps(new_state_data)
+
+            if state_record:
+                state_record.state_data = encoded_data
+                state_record.commit_hash = commit_hash
+            else:
+                new_record = IaCState(id=state_id, state_data=encoded_data, commit_hash=commit_hash)
+                session.add(new_record)
+            session.commit()
+        except Exception as e:
+            log.error(f"Failed to update state '{state_id}': {e}")
+            session.rollback()
+        finally:
+            if session: session.close()
                 
                 
     def update_progress(self, job_id: int, progress: int = None, current_step: str = None):

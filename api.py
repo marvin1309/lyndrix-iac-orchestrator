@@ -1,5 +1,7 @@
 import hmac
+import yaml
 from fastapi import APIRouter, Request, Header, HTTPException
+from pydantic import BaseModel
 from nicegui import ui
 
 iac_api_router = APIRouter(prefix="/api/iac", tags=["IaC Orchestrator"])
@@ -46,6 +48,37 @@ async def gitlab_webhook(request: Request, x_gitlab_token: str = Header(None)):
     except Exception as e:
         _ctx.log.error(f"WEBHOOK ERROR: {str(e)}")
         raise HTTPException(status_code=400, detail="Malformed JSON payload")
-    
+
+
+# --- NEW EXPOSED CONTROL ENDPOINTS ---
+
+@iac_api_router.get("/catalog")
+async def get_service_catalog():
+    """Returns the parsed global service catalog."""
+    if not _engine: raise HTTPException(status_code=500, detail="Engine offline")
+    catalog_file = _engine.config.git_repos_dir / "iac_controller" / "environments" / "global" / "02_service_catalog.yml"
+    if catalog_file.exists():
+        with open(catalog_file, 'r') as f:
+            data = yaml.safe_load(f) or {}
+            return data.get("service_catalog", {}).get("services", [])
+    return []
+
+class DeployRequest(BaseModel):
+    branch: str = "main"
+
+@iac_api_router.post("/deploy/service/{service_name}")
+async def trigger_service_deployment(service_name: str, payload: DeployRequest):
+    """Triggers a targeted single-service deployment."""
+    if not _ctx: raise HTTPException(status_code=500, detail="Context offline")
+    event_payload = {"pipeline_type": "single_service", "service_name": service_name, "service_branch": payload.branch, "manual": True}
+    _ctx.emit("iac:webhook_verified", event_payload)
+    return {"status": "accepted", "message": f"Deployment queued for {service_name}"}
+
+@iac_api_router.get("/jobs")
+async def list_orchestrator_jobs(limit: int = 20):
+    """Returns a list of recent and active jobs."""
+    if not _engine: raise HTTPException(status_code=500, detail="Engine offline")
+    return _engine.db.get_recent_jobs(limit)
+
     
     

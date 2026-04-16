@@ -7,8 +7,9 @@ from .engine import DeploymentEngine
 from .ui_dashboard import render_dashboard
 from .ui_settings import render_settings_ui as modular_settings_ui
 from .database import JobDatabase
-from .models import IaCJob
+from .models import IaCJob, Base
 from core.components.database.logic.db_service import db_instance
+from .config import IaCConfig
 
 # ==========================================
 # 1. MANIFEST
@@ -52,8 +53,9 @@ def render_settings_ui(ctx):
 async def setup(ctx):
     ctx.log.info("IaC Orchestrator: Executing async setup sequence...")
     
+    config = IaCConfig(ctx)
     job_db = JobDatabase()
-    engine = DeploymentEngine(ctx, plugin_state, job_db)
+    engine = DeploymentEngine(ctx, plugin_state, job_db, config)
     
     # Initialize the API with the engine instance
     init_api(ctx, engine)
@@ -65,7 +67,7 @@ async def setup(ctx):
         if db_instance.is_connected and db_instance.engine:
             ctx.log.info("IaC Orchestrator: Verifying database tables...")
             try:
-                IaCJob.__table__.create(bind=db_instance.engine, checkfirst=True)
+                Base.metadata.create_all(bind=db_instance.engine, checkfirst=True)
             except Exception as e:
                 ctx.log.error(f"Failed to create tables: {e}")
 
@@ -103,4 +105,4 @@ async def setup(ctx):
     @ui.page('/iac')
     @main_layout('IaC Orchestrator')
     async def dashboard_page():
-        await render_dashboard(ctx, plugin_state, engine)
+        await render_dashboard(ctx, plugin_state, engine, config)

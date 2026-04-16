@@ -8,11 +8,11 @@ from ui.theme import UIStyles
 
 DOCKER_ICON = 'svg:M6.1,10L0,10.1V13h6.1V10z M13.1,10H7v3h6.1V10z M20.1,10H14v3h6.1V10z M13.1,3H7v3h6.1V3z'
 
-async def render_dashboard(ctx, state, engine):
+async def render_dashboard(ctx, state, engine, config):
     active_job_cards = {} 
 
     def load_catalog():
-        catalog_path = Path("/data/storage/git_repos/iac_controller/environments/global/02_service_catalog.yml")
+        catalog_path = config.git_repos_dir / "iac_controller" / "environments" / "global" / "02_service_catalog.yml"
         if catalog_path.exists():
             try:
                 with open(catalog_path, 'r') as f:
@@ -23,7 +23,7 @@ async def render_dashboard(ctx, state, engine):
 
     def load_assignments():
         assignments = []
-        base_dir = Path("/data/storage/git_repos/iac_controller/environments")
+        base_dir = config.git_repos_dir / "iac_controller" / "environments"
         sites_dir = base_dir / "sites"
         profiles_file = base_dir / "global" / "03_profiles.yml"
         
@@ -113,7 +113,7 @@ async def render_dashboard(ctx, state, engine):
     def open_live_logs(job_id):
         log_title.set_text(f"Live Pipeline Logs: Job #{job_id}")
         log_stream.set_text("Loading...")
-        log_path = Path(f"/data/storage/logs/job_{job_id}.log")
+        log_path = config.get_log_path(job_id)
         if log_path.exists():
             with open(log_path, 'r', encoding='utf-8', errors='replace') as f:
                 f.seek(0, 2)
@@ -134,7 +134,7 @@ async def render_dashboard(ctx, state, engine):
             ui.label('GitOps Dashboard').classes(UIStyles.TITLE_H2)
             with ui.row().classes('gap-3'):
                 ui.button('Test Connect', on_click=lambda: ctx.emit("iac:webhook_verified", {"pipeline_type": "connectivity", "manual": True}), icon='cable', color='blue-6').props('unelevated rounded size=sm').bind_enabled_from(state, 'is_running', backward=lambda x: not x)
-                ui.button('Deploy Service', on_click=lambda: ui.notify("Use the Service Catalog tab for targeted deploys", type="info"), icon='rocket', color='indigo-500').props('unelevated rounded size=sm').bind_enabled_from(state, 'is_running', backward=lambda x: not x)
+                ui.button('Deploy Service', on_click=lambda: ui.notify("Use the Service Catalog tab for targeted deploys", type="info"), icon='rocket', color='indigo-500').props('unelevated rounded size=sm')
                 ui.button('Run Rollout', on_click=lambda: ctx.emit("iac:webhook_verified", {"pipeline_type": "rollout", "manual": True}), icon='rocket_launch', color='emerald').props('unelevated rounded size=sm').bind_enabled_from(state, 'is_running', backward=lambda x: not x)
                 ui.button('ABORT', on_click=abort_execution, icon='dangerous', color='red-6').props('unelevated rounded size=sm').bind_visibility_from(state, 'is_running')
 
@@ -230,7 +230,7 @@ async def render_dashboard(ctx, state, engine):
                                         
                                         with ui.row().classes('w-full justify-between items-center gap-2'):
                                             ui.button(icon='history', on_click=lambda n=name: [svc_history_title.set_text(f"Deployment History: {n}"), setattr(svc_history_table, 'rows', engine.db.get_service_history(n)), svc_history_dialog.open()]).props('flat round size=sm color=zinc-500').tooltip("View Deployment History")
-                                            ui.button('Deploy', icon='rocket', on_click=lambda n=name, b=branch: ctx.emit("iac:webhook_verified", {"pipeline_type": "single_service", "service_name": n, "service_branch": b, "manual": True})).props('unelevated rounded size=sm color=indigo').bind_enabled_from(state, 'is_running', backward=lambda x: not x)
+                                            ui.button('Deploy', icon='rocket', on_click=lambda n=name, b=branch: ctx.emit("iac:webhook_verified", {"pipeline_type": "single_service", "service_name": n, "service_branch": b, "manual": True})).props('unelevated rounded size=sm color=indigo')
 
                     catalog_search.on('update:model-value', render_catalog_cards)
                     render_catalog_cards()
