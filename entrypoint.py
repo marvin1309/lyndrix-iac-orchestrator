@@ -47,6 +47,21 @@ def render_settings_ui(ctx):
     """Glue function for settings injection."""
     modular_settings_ui(ctx, plugin_state)
 
+# --- NEW: WIDGET INJECTION ---
+def render_dashboard_widget(ctx):
+    """Renders a status widget for the main dashboard."""
+    with ui.column().classes('gap-2 w-full'):
+        ui.label("IaC Orchestrator").classes("text-base font-bold text-slate-200")
+        ui.separator().classes('my-1 opacity-20')
+        with ui.row().classes('w-full justify-between items-center'):
+            ui.label("Last Deployment:").classes("text-xs text-slate-400")
+            ui.label().classes("text-xs font-mono").bind_text_from(plugin_state, 'last_deployment')
+        with ui.row().classes('w-full justify-between items-center'):
+            ui.label("Pipeline Active:").classes("text-xs text-slate-400")
+            with ui.row().classes('items-center gap-2'):
+                ui.spinner('dots', color='indigo').bind_visibility_from(plugin_state, 'is_running')
+                ui.label().classes("text-xs font-mono").bind_text_from(plugin_state, 'is_running', lambda v: "Yes" if v else "No")
+
 # ==========================================
 # 4. PLUGIN BOOT SEQUENCE
 # ==========================================
