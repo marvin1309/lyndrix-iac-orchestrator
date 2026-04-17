@@ -54,3 +54,6 @@ vault_data/
 app/plugins/*
 app/plugins
 .cache
+vendor/*
+vendor
+/vendor/

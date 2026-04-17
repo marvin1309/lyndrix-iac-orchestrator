@@ -345,10 +345,43 @@ class DeploymentEngine:
             if future in self.pending_syncs.get(role_slug, []): self.pending_syncs[role_slug].remove(future)
 
     async def _execute_native_generation(self):
-        sys.path.insert(0, str(Path(__file__).parent.resolve() / "iac_core" / "app"))
-        orig_argv, sys.argv = sys.argv, ["generator.py", "--inventory-dir", str(self.base_git_dir / "iac_controller"), "--output-dir", str(self.base_git_dir / "inventory_state")]
-        try: await asyncio.get_event_loop().run_in_executor(None, importlib.import_module("generator").main)
-        finally: sys.path.remove(sys.path[0]); sys.argv = orig_argv
+        plugin_root = Path(__file__).parent.resolve()
+        generator_script = plugin_root / "iac_core" / "app" / "generator.py"
+        generator_root = plugin_root / "iac_core" / "app"
+        vendor_dir = plugin_root / "vendor"
+        # The main Lyndrix application root (e.g., /app in Docker)
+        app_root = plugin_root.parents[1]
+        
+        if not generator_script.exists():
+            raise FileNotFoundError(f"Generator script not found at {generator_script}")
+
+        # Inject the private vendor directory into the subprocess PYTHONPATH
+        env = os.environ.copy()
+        
+        # Build a new PYTHONPATH, prioritizing the plugin's vendored libraries
+        # and its own source root for relative imports.
+        new_path_parts = []
+        if vendor_dir.exists():
+            new_path_parts.append(str(vendor_dir))
+        if generator_root.exists():
+            new_path_parts.append(str(generator_root))
+        if app_root.exists():
+            new_path_parts.append(str(app_root))
+        if env.get("PYTHONPATH"):
+            new_path_parts.append(env["PYTHONPATH"])
+        env["PYTHONPATH"] = ":".join(new_path_parts)
+
+        cmd = [
+            sys.executable, str(generator_script),
+            "--inventory-dir", str(self.base_git_dir / "iac_controller"),
+            "--output-dir", str(self.base_git_dir / "inventory_state")
+        ]
+        
+        proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT, env=env)
+        stdout, _ = await proc.communicate()
+        
+        if proc.returncode != 0:
+            raise RuntimeError(f"Native artifact generation failed:\n{stdout.decode('utf-8', errors='replace')}")
 
     async def reconcile_orphaned_runners(self, job_id=None):
         try:
