@@ -17,7 +17,7 @@ from .config import IaCConfig
 manifest = ModuleManifest(
     id="lyndrix.plugin.iac_orchestrator",
     name="IaC Orchestrator",
-    version="0.2.1",
+    version="0.2.2",
     description="Standalone GitOps controller for executing Terraform and Ansible pipelines.",
     author="Lyndrix",
     icon="rocket_launch", 
@@ -25,7 +25,7 @@ manifest = ModuleManifest(
     ui_route="/iac",
     permissions={
         "subscribe": ["vault:ready_for_data", "iac:webhook_verified", "git:status_update", "db:connected"], 
-        "emit": ["iac:pipeline_started", "iac:webhook_verified", "git:sync", "git:commit_push"]
+        "emit": ["iac:pipeline_started", "iac:webhook_verified", "git:sync", "git:commit_push", "system:notify", "user:notify"]
     }
 )
 
@@ -72,6 +72,9 @@ async def setup(ctx):
     job_db = JobDatabase()
     engine = DeploymentEngine(ctx, plugin_state, job_db, config)
     
+    # Restore the Auto-Apply setting from Vault/Config on boot
+    plugin_state["auto_apply_enabled"] = config.auto_apply
+
     # Initialize the API with the engine instance
     init_api(ctx, engine)
     
@@ -83,6 +86,11 @@ async def setup(ctx):
             ctx.log.info("IaC Orchestrator: Verifying database tables...")
             try:
                 Base.metadata.create_all(bind=db_instance.engine, checkfirst=True)
+                
+                # Restore the last deployment status for the UI on boot
+                recent = job_db.get_recent_jobs(1)
+                if recent:
+                    plugin_state["last_deployment"] = recent[0]["status"]
             except Exception as e:
                 ctx.log.error(f"Failed to create tables: {e}")
 
@@ -110,6 +118,13 @@ async def setup(ctx):
             remaining_services = job_db.get_pending_tasks(job.id)
             if remaining_services:
                 asyncio.create_task(engine.resume_bulk_rollout(job.id, remaining_services))
+            elif not any(t.get("job_id") == job.id for t in engine.state.get("active_tasks", {}).values()):
+                # If the job has no pending tasks AND no orphaned runners reattached to it,
+                # the container was completely destroyed. We must close it out so it doesn't hang.
+                ctx.log.warning(f"IaC Orchestrator: Job #{job.id} is RUNNING but has no active runners. Marking as FAILED.")
+                job_db.update_job(job.id, "FAILED")
+                job_db.update_progress(job.id, progress=None, current_step="System Restart (Aborted)")
+                plugin_state["last_deployment"] = "FAILED"
 
     # Spawn reconciliation instantly in the background
     asyncio.create_task(run_reconciliation())

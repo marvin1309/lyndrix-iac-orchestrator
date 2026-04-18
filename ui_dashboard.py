@@ -98,47 +98,68 @@ async def render_dashboard(ctx, state, engine, config):
             job_id = recent[0]["id"]
             engine.db.update_job(job_id, "ABORTED")
             engine.db.update_progress(job_id, progress=None, current_step="Aborted by User")
+            ctx.emit("system:notify", {"id": f"job_{job_id}", "title": f"Pipeline #{job_id} Aborted", "message": "Execution aborted by user.", "type": "warning", "toast": True})
             
         state["is_running"] = False
         state["active_tasks"] = {}
         ui.notify("Execution Aborted Successfully.", type="info")
+        
+    active_log_job = {"id": None}
 
-    with ui.dialog() as log_viewer, ui.card().classes('w-full max-w-5xl h-[80vh] bg-black p-0 border border-zinc-800 flex flex-col no-wrap'):
+    with ui.dialog() as log_viewer, ui.card().classes(f'w-full max-w-5xl h-[80vh] p-0 flex flex-col no-wrap !bg-black {UIStyles.MODAL_CONTAINER}'):
         with ui.row().classes('w-full p-4 justify-between items-center border-b border-zinc-800 bg-zinc-900'):
-            log_title = ui.label("Live Stream").classes('text-indigo-400 font-bold')
+            with ui.row().classes('items-center gap-6'):
+                log_title = ui.label("Live Stream").classes('text-indigo-400 font-bold')
+                log_search = ui.input('Filter logs (grep)...').props('outlined dense clearable dark').classes('w-64')
             ui.button(icon='close', on_click=log_viewer.close).props('flat round dense color=zinc-500')
-        with ui.scroll_area().classes('w-full flex-grow bg-black p-4'):
+        with ui.scroll_area().classes('w-full flex-grow bg-black p-4') as log_scroll:
             log_stream = ui.label().classes('whitespace-pre-wrap font-mono text-[11px] text-green-500 break-words')
 
-    def open_live_logs(job_id):
-        log_title.set_text(f"Live Pipeline Logs: Job #{job_id}")
-        log_stream.set_text("Loading...")
-        log_path = config.get_log_path(job_id)
+    def update_log_content():
+        if not log_viewer.value or not active_log_job["id"]:
+            return
+        log_path = config.get_log_path(active_log_job["id"])
         if log_path.exists():
             with open(log_path, 'r', encoding='utf-8', errors='replace') as f:
                 f.seek(0, 2)
                 file_size = f.tell()
                 if file_size > 1048576:
                     f.seek(file_size - 100000)
-                    content = f.read()
-                    log_stream.set_text("[TRUNCATED] Showing last 100kb of logs...\n\n" + content)
+                    new_text = "[TRUNCATED] Showing last 100kb of logs...\n\n" + f.read()
                 else:
                     f.seek(0)
-                    log_stream.set_text(f.read())
-        else:
+                    new_text = f.read()
+                
+                # Apply grep-style filtering if a search term is provided
+                term = (log_search.value or "").lower()
+                if term:
+                    filtered_lines = [line for line in new_text.split('\n') if term in line.lower()]
+                    new_text = f"[FILTERED FOR: '{term}']\n" + '\n'.join(filtered_lines)
+                
+                if log_stream.text != new_text:
+                    log_stream.set_text(new_text)
+                    log_scroll.scroll_to(percent=1.0)
+        elif log_stream.text == "Loading...":
             log_stream.set_text("No log file found on disk. (Legacy job or delayed write)")
+
+    log_search.on('update:model-value', update_log_content)
+    ui.timer(1.0, update_log_content)
+
+    def open_live_logs(job_id):
+        active_log_job["id"] = job_id
+        log_title.set_text(f"Live Pipeline Logs: Job #{job_id}")
+        log_stream.set_text("Loading...")
         log_viewer.open()
+        update_log_content()
 
     with ui.column().classes('w-full gap-6'):
         with ui.row().classes('w-full justify-between items-center'):
             ui.label('GitOps Dashboard').classes(UIStyles.TITLE_H2)
             with ui.row().classes('gap-3'):
-                ui.button('Test Connect', on_click=lambda: ctx.emit("iac:webhook_verified", {"pipeline_type": "connectivity", "manual": True}), icon='cable', color='blue-6').props('unelevated rounded size=sm').bind_enabled_from(state, 'is_running', backward=lambda x: not x)
-                ui.button('Deploy Service', on_click=lambda: ui.notify("Use the Service Catalog tab for targeted deploys", type="info"), icon='rocket', color='indigo-500').props('unelevated rounded size=sm')
-                ui.button('Run Rollout', on_click=lambda: ctx.emit("iac:webhook_verified", {"pipeline_type": "rollout", "manual": True}), icon='rocket_launch', color='emerald').props('unelevated rounded size=sm').bind_enabled_from(state, 'is_running', backward=lambda x: not x)
+                ui.button('Resync Repositories', on_click=lambda: asyncio.create_task(engine.sync_core_repos()), icon='sync', color='blue-6').props('unelevated rounded size=sm').bind_enabled_from(state, 'is_running', backward=lambda x: not x)
                 ui.button('ABORT', on_click=abort_execution, icon='dangerous', color='red-6').props('unelevated rounded size=sm').bind_visibility_from(state, 'is_running')
 
-        with ui.tabs().classes('w-full border-b border-zinc-800') as tabs:
+        with ui.tabs().classes(UIStyles.TAB_BAR) as tabs:
             overview_tab = ui.tab('Overview', icon='dashboard')
             catalog_tab = ui.tab('Service Catalog', icon='apps')
             assignment_tab = ui.tab('Assignments', icon='account_tree')
@@ -155,19 +176,23 @@ async def render_dashboard(ctx, state, engine, config):
                     ui.label("Infrastructure is stable. No active jobs.").classes('text-xl font-bold')
 
             with ui.tab_panel(catalog_tab).classes('gap-4 p-4'):
-                with ui.dialog() as svc_history_dialog, ui.card().classes('w-full max-w-4xl p-0 bg-zinc-950 border border-zinc-800'):
-                    with ui.row().classes('p-4 w-full justify-between items-center border-b border-zinc-800'):
-                        svc_history_title = ui.label("").classes('text-lg font-bold text-indigo-400')
-                        ui.button(icon='close', on_click=svc_history_dialog.close).props('flat round dense color=zinc-500')
-                    svc_history_table = ui.table(columns=[
-                        {'name': 'id', 'label': 'Job ID', 'field': 'id', 'align': 'left'},
-                        {'name': 'start_time', 'label': 'Date', 'field': 'start_time', 'align': 'left'},
-                        {'name': 'status', 'label': 'Status', 'field': 'status', 'align': 'left'},
-                        {'name': 'action', 'label': 'Log', 'field': 'action', 'align': 'center'}
-                    ], rows=[], row_key='id').classes('w-full bg-transparent shadow-none')
-                    svc_history_table.add_slot('body-cell-status', '''<q-td :props="props"><q-badge :color="props.value === 'SUCCESS' ? 'positive' : (props.value === 'RUNNING' ? 'warning' : 'negative')">{{props.value}}</q-badge></q-td>''')
-                    svc_history_table.add_slot('body-cell-action', '''<q-td :props="props"><q-btn size="sm" icon="article" color="primary" @click="() => $parent.$emit('view', props.row)" /></q-td>''')
-                    svc_history_table.on('view', lambda e: show_job_logs_wrapper(e.args['id']))
+                with ui.dialog() as svc_history_dialog, ui.card().classes(f'w-full max-w-4xl p-0 overflow-hidden {UIStyles.MODAL_CONTAINER} lyndrix-card'):
+                    with ui.row().classes('w-full justify-between items-center p-4 border-b border-slate-200 dark:border-zinc-800 bg-slate-50/50 dark:bg-zinc-900/50'):
+                        with ui.row().classes('items-center gap-3'):
+                            ui.icon('history', size='24px').classes('text-primary')
+                            svc_history_title = ui.label("").classes('text-lg font-bold text-slate-800 dark:text-zinc-100')
+                        ui.button(icon='close', on_click=svc_history_dialog.close).props('flat round dense').classes('text-slate-500 hover:text-slate-800 dark:hover:text-white transition-colors')
+                    
+                    with ui.scroll_area().classes('w-full max-h-[60vh]'):
+                        svc_history_table = ui.table(columns=[
+                            {'name': 'id', 'label': 'Job ID', 'field': 'id', 'align': 'left'},
+                            {'name': 'start_time', 'label': 'Date', 'field': 'start_time', 'align': 'left'},
+                            {'name': 'status', 'label': 'Status', 'field': 'status', 'align': 'left'},
+                            {'name': 'action', 'label': 'Log', 'field': 'action', 'align': 'center'}
+                        ], rows=[], row_key='id').classes('w-full !bg-transparent shadow-none text-slate-800 dark:text-zinc-200').props('flat')
+                        svc_history_table.add_slot('body-cell-status', '''<q-td :props="props"><q-badge :color="props.value === 'SUCCESS' ? 'positive' : (props.value === 'RUNNING' ? 'warning' : 'negative')">{{props.value}}</q-badge></q-td>''')
+                        svc_history_table.add_slot('body-cell-action', '''<q-td :props="props"><q-btn flat round size="sm" icon="article" color="primary" @click="() => $parent.$emit('view', props.row)" /></q-td>''')
+                        svc_history_table.on('view', lambda e: show_job_logs_wrapper(e.args['id']))
 
                 def show_job_logs_wrapper(jid):
                     svc_history_dialog.close()
@@ -245,6 +270,7 @@ async def render_dashboard(ctx, state, engine, config):
                     with ui.row().classes('gap-2 items-center'):
                         search_input = ui.input('Search Host or Service...').props('outlined dense clearable').classes('w-64')
                         ui.button(icon='refresh', on_click=lambda: assignment_container.refresh()).props('flat round color=zinc-500')
+                        ui.button('Global Rollout', icon='public', color='emerald', on_click=lambda: ctx.emit("iac:webhook_verified", {"pipeline_type": "rollout", "limit": "all", "manual": True})).props('unelevated rounded size=sm').bind_enabled_from(state, 'is_running', backward=lambda x: not x).tooltip("Trigger full infrastructure rollout")
 
                 @ui.refreshable
                 def assignment_container():
@@ -253,45 +279,70 @@ async def render_dashboard(ctx, state, engine, config):
                         ui.label("No assignments found. Ensure 'iac_controller/environments' is populated.").classes(f'{UIStyles.TEXT_MUTED} italic mt-4')
                         return
 
-                    grid = ui.grid(columns='repeat(auto-fill, minmax(350px, 1fr))').classes('w-full gap-4 mt-2')
-                    
                     def render_cards(e=None):
-                        grid.clear()
                         term = (search_input.value or "").lower()
-                        with grid:
-                            for item in assignments:
-                                site, stage, host, svcs = item['site'], item['stage'], item['host'], item['services']
+                        
+                        # Group by Site and Stage
+                        sites = {}
+                        for item in assignments:
+                            site, stage, host, svcs = item['site'], item['stage'], item['host'], item['services']
+                            if not term or term in host.lower() or term in site.lower() or term in stage.lower() or any(term in s.lower() for s in svcs):
+                                if site not in sites: sites[site] = {}
+                                if stage not in sites[site]: sites[site][stage] = []
+                                sites[site][stage].append(item)
+
+                        assignment_wrapper.clear()
+                        with assignment_wrapper:
+                            if not sites:
+                                ui.label("No matching hosts found.").classes(f'{UIStyles.TEXT_MUTED} italic mt-4')
+                                return
                                 
-                                # Interactive search filter
-                                match = not term or term in host.lower() or term in site.lower() or term in stage.lower() or any(term in s.lower() for s in svcs)
-                                
-                                if match:
-                                    with ui.card().classes(f'{UIStyles.CARD_BASE} flex flex-col gap-2 hover:border-indigo-500/50 transition-all'):
-                                        with ui.row().classes('w-full justify-between items-center border-b border-zinc-800/50 pb-2'):
+                            for site, stages in sorted(sites.items()):
+                                with ui.column().classes('w-full mt-4 gap-2'):
+                                    with ui.row().classes('w-full items-center gap-3 border-b border-zinc-800 pb-2'):
+                                        ui.icon('domain', size='24px').classes('text-slate-400')
+                                        ui.label(site.upper()).classes('text-xl font-black tracking-widest text-slate-800 dark:text-slate-200')
+                                        ui.space()
+                                        ui.button('Site Rollout', icon='rocket_launch', on_click=lambda s=site: ctx.emit("iac:webhook_verified", {"pipeline_type": "rollout", "limit": s, "manual": True})).props('flat rounded size=sm color=slate').bind_enabled_from(state, 'is_running', backward=lambda x: not x).tooltip(f"Rollout all hosts in {site.upper()}")
+
+                                    for stage, items in sorted(stages.items()):
+                                        with ui.column().classes('w-full pl-4 md:pl-6 border-l-2 border-zinc-800/50 mt-2 gap-3'):
                                             with ui.row().classes('items-center gap-2'):
-                                                ui.icon('dns', size='18px').classes('text-slate-400')
-                                                ui.label(host).classes('text-md font-bold text-slate-100 truncate max-w-[150px]').tooltip(host)
-                                            with ui.row().classes('gap-1'):
-                                                ui.chip(site.upper(), icon='domain').props('color=blue-900 text-color=blue-200 size=xs square')
-                                                ui.chip(stage.upper(), icon='layers').props('color=emerald-900 text-color=emerald-200 size=xs square')
-                                        
-                                        with ui.row().classes('gap-1.5 pt-1'):
-                                            for svc in svcs:
-                                                ui.chip(svc, icon='apps', color='zinc-800').props('text-color=slate-300 size=sm')
+                                                ui.icon('layers', size='16px').classes('text-emerald-500')
+                                                ui.label(stage.upper()).classes('text-sm font-bold text-emerald-400 tracking-wider')
+                                            
+                                            with ui.grid(columns='repeat(auto-fill, minmax(350px, 1fr))').classes('w-full gap-4'):
+                                                for item in items:
+                                                    host, svcs = item['host'], item['services']
+                                                    with ui.card().classes(f'{UIStyles.CARD_BASE} flex flex-col gap-2 hover:border-indigo-500/50 transition-all p-4'):
+                                                        with ui.row().classes('w-full justify-between items-center border-b border-zinc-800/50 pb-2'):
+                                                            with ui.row().classes('items-center gap-2'):
+                                                                ui.icon('dns', size='18px').classes('text-slate-400')
+                                                                ui.label(host).classes('text-md font-bold text-slate-800 dark:text-slate-300 truncate max-w-[150px]').tooltip(host)
+                                                            ui.button('Deploy Host', icon='rocket', on_click=lambda h=host: ctx.emit("iac:webhook_verified", {"pipeline_type": "rollout", "limit": h, "manual": True})).props('unelevated rounded size=sm color=indigo').tooltip(f"Deploy to {host}").bind_enabled_from(state, 'is_running', backward=lambda x: not x)
+                                                        
+                                                        with ui.row().classes('gap-1.5 pt-1'):
+                                                            for svc in svcs:
+                                                                ui.chip(svc, icon='apps', color='zinc-800').props('text-color=slate-300 size=sm')
                     
+                    assignment_wrapper = ui.column().classes('w-full')
                     search_input.on('update:model-value', render_cards)
                     render_cards()
                     
                 assignment_container()
 
             with ui.tab_panel(history_tab).classes('p-4'):
+                with ui.row().classes('w-full justify-between items-center mb-4'):
+                    ui.label('Deployment History').classes(UIStyles.TITLE_H3)
+                    history_search = ui.input('Search Job ID, Type or Status...').props('outlined dense clearable').classes('w-64')
+
                 history_table = ui.table(columns=[
                     {'name': 'id', 'label': 'ID', 'field': 'id', 'sortable': True, 'align': 'left'},
                     {'name': 'pipeline_type', 'label': 'Pipeline Type', 'field': 'pipeline_type', 'align': 'left'},
                     {'name': 'progress', 'label': 'Progress', 'field': 'progress', 'align': 'left'},
                     {'name': 'status', 'label': 'Status', 'field': 'status', 'align': 'left'},
                     {'name': 'action', 'label': 'Logs', 'field': 'action', 'align': 'center'}
-                ], rows=engine.db.get_recent_jobs(), row_key='id').classes(f'{UIStyles.CARD_BASE} w-full mt-2')
+                ], rows=engine.db.get_recent_jobs(), row_key='id').classes(f'{UIStyles.CARD_BASE} w-full mt-2 text-slate-800 dark:text-zinc-200')
                 history_table.add_slot('body-cell-progress', '''<q-td :props="props"><q-linear-progress :value="(props.value || 0)/100" color="indigo" class="mt-2"/><div class="text-center text-[10px]">{{props.value || 0}}%</div></q-td>''')
                 history_table.add_slot('body-cell-status', '''<q-td :props="props"><q-badge :color="props.value === 'SUCCESS' ? 'positive' : (props.value === 'RUNNING' ? 'warning' : 'negative')">{{props.value}}</q-badge></q-td>''')
                 history_table.add_slot('body-cell-action', '''<q-td :props="props"><q-btn size="sm" color="zinc-700" icon="folder_open" @click="() => $parent.$emit('view', props.row)" /></q-td>''')
@@ -351,7 +402,13 @@ async def render_dashboard(ctx, state, engine, config):
                                 ui.label("Waiting for pool...").classes('text-[10px] text-zinc-600 italic px-1')
 
             if tabs.value == 'History & Logs':
-                history_table.rows = engine.db.get_recent_jobs()
+                term = (history_search.value or "").lower()
+                # Fetch slightly more jobs if we are actively searching to ensure better coverage
+                all_jobs = engine.db.get_recent_jobs(100 if term else 20)
+                if term:
+                    history_table.rows = [j for j in all_jobs if term in str(j['id']).lower() or term in str(j['pipeline_type']).lower() or term in str(j['status']).lower()]
+                else:
+                    history_table.rows = all_jobs
                 history_table.update()
 
         ui.timer(1.0, update_ui_loop)

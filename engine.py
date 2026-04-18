@@ -205,10 +205,13 @@ class DeploymentEngine:
         
         # FILE LOGGING SETUP
         bridge = JobFileLogBridge(self.config.get_log_path(current_job_id))
-        logging.getLogger("IaC").addHandler(bridge)
+        logging.getLogger("IaC:Engine").addHandler(bridge)
         
         log.info("[SYSTEM] Pipeline Started")
         log.info(f"[SYSTEM] Job #{current_job_id} registered in database.")
+        
+        # Event-Driven Notification: Register a silent active task in the bell menu
+        self.ctx.emit("system:notify", {"id": f"job_{current_job_id}", "title": f"Pipeline #{current_job_id}", "message": f"Running: {pipeline_type}", "type": "ongoing", "toast": False})
 
         context = {"payload": payload, "job_id": current_job_id}
         
@@ -235,7 +238,7 @@ class DeploymentEngine:
             pipeline.extend([
                 DetectDriftStage(),
                 SyncAllServicesStage(), 
-                AsyncBulkRolloutStage(inventory_path="global/ansible/inventory.yml", limit="all"),
+                AsyncBulkRolloutStage(inventory_path="global/ansible/inventory.yml", limit=payload.get("limit", "all")),
                 CleanupOrphanedServicesStage(),
                 DynamicRuleExecutionStage(pipeline_type),
                 PersistStateStage()
@@ -246,8 +249,8 @@ class DeploymentEngine:
         try:
             total_stages = len(pipeline)
             for idx, stage in enumerate(pipeline):
-                # MACRO PROGRESS UPDATE
-                pct = int((idx / total_stages) * 100)
+                # PRE-ANSIBLE MACRO PROGRESS UPDATE (0% to 50%)
+                pct = int((idx / total_stages) * 50)
                 self.db.update_progress(current_job_id, progress=pct, current_step=f"Stage: {stage.name}")
                 
                 log.info(f"--- STAGE: {stage.name} ---")
@@ -262,12 +265,19 @@ class DeploymentEngine:
             log.info("[SYSTEM] Pipeline completed successfully.")
             self.state["last_deployment"] = "SUCCESS"
             self.db.update_progress(current_job_id, progress=100, current_step="Completed Successfully")
+            
+            # Clear the ongoing notification from the bell menu and send a standalone success toast
+            self.ctx.emit("system:notify", {"id": f"job_{current_job_id}", "action": "clear"})
+            self.ctx.emit("system:notify", {"title": f"Pipeline #{current_job_id}", "message": "Completed successfully.", "type": "positive", "toast": True})
         except Exception as e:
             log.error(f"!!! [FATAL] {str(e)}")
             self.state["last_deployment"] = "FAILED"
             self.db.update_progress(current_job_id, progress=None, current_step="Failed")
+            
+            # Update the existing ongoing notification in-place to an Error state
+            self.ctx.emit("system:notify", {"id": f"job_{current_job_id}", "title": f"Pipeline #{current_job_id} Failed", "message": str(e), "type": "negative", "toast": True})
         finally:
-            logging.getLogger("IaC").removeHandler(bridge)
+            logging.getLogger("IaC:Engine").removeHandler(bridge)
             self.state["running_jobs"] = max(0, self.state.get("running_jobs", 0) - 1)
             self.state["is_running"] = self.state["running_jobs"] > 0
             self.db.update_job(job_id=current_job_id, status=self.state["last_deployment"])
@@ -278,10 +288,12 @@ class DeploymentEngine:
         self.state["running_jobs"] = self.state.get("running_jobs", 0) + 1
         self.state["is_running"] = self.state["running_jobs"] > 0
         
-        self.db.update_progress(job_id, progress=None, current_step="Resuming Bulk Rollout...")
+        self.db.update_progress(job_id, progress=50, current_step="Resuming Bulk Rollout...")
         bridge = JobFileLogBridge(self.config.get_log_path(job_id))
-        logging.getLogger("IaC").addHandler(bridge)
+        logging.getLogger("IaC:Engine").addHandler(bridge)
         log.info(f"[SYSTEM] Resuming {len(pending_services)} pending services from job #{job_id}")
+        
+        self.ctx.emit("system:notify", {"id": f"job_{job_id}", "title": f"Pipeline #{job_id}", "message": "Resuming Bulk Rollout...", "type": "ongoing", "toast": False})
         
         context = {"payload": {}, "job_id": job_id}
         stage = AsyncBulkRolloutStage(inventory_path="global/ansible/inventory.yml", limit="all", target_services=pending_services)
@@ -290,13 +302,19 @@ class DeploymentEngine:
             res = await stage.run(self, context)
             log.info("[SYSTEM] Resumed Pipeline completed.")
             self.state["last_deployment"] = "SUCCESS" if res.success else "FAILED"
-            if res.success: self.db.update_progress(job_id, progress=100, current_step="Resume Completed")
+            if res.success: 
+                self.db.update_progress(job_id, progress=100, current_step="Resume Completed")
+                self.ctx.emit("system:notify", {"id": f"job_{job_id}", "action": "clear"})
+                self.ctx.emit("system:notify", {"title": f"Pipeline #{job_id}", "message": "Resume completed successfully.", "type": "positive", "toast": True})
+            else:
+                self.ctx.emit("system:notify", {"id": f"job_{job_id}", "title": f"Pipeline #{job_id} Resume Failed", "message": "Stage failed.", "type": "negative", "toast": True})
         except Exception as e:
             log.error(f"!!! [FATAL] {str(e)}")
             self.state["last_deployment"] = "FAILED"
             self.db.update_progress(job_id, progress=None, current_step="Resume Failed")
+            self.ctx.emit("system:notify", {"id": f"job_{job_id}", "title": f"Pipeline #{job_id} Resume Failed", "message": str(e), "type": "negative", "toast": True})
         finally:
-            logging.getLogger("IaC").removeHandler(bridge)
+            logging.getLogger("IaC:Engine").removeHandler(bridge)
             self.state["running_jobs"] = max(0, self.state.get("running_jobs", 0) - 1)
             self.state["is_running"] = self.state["running_jobs"] > 0
             self.db.update_job(job_id=job_id, status=self.state["last_deployment"])
@@ -304,10 +322,20 @@ class DeploymentEngine:
     async def sync_core_repos(self):
         """Periodic/Startup task to keep core repositories up to date."""
         log.info("[SYSTEM] Initiating background sync for core repositories...")
+        self.ctx.emit("system:notify", {"id": "sys_repo_sync", "title": "Repository Sync", "message": "Synchronizing core repositories...", "type": "ongoing", "toast": False})
+        
+        all_success = True
         for repo in ["iac_controller", "inventory_state", "config_engine"]:
             success = await self.execute_git_sync(repo)
             if not success:
                 log.warning(f"Failed to sync {repo} during background operation.")
+                all_success = False
+                
+        self.ctx.emit("system:notify", {"id": "sys_repo_sync", "action": "clear"})
+        if all_success:
+            self.ctx.emit("system:notify", {"title": "Repository Sync", "message": "Core repositories synchronized successfully.", "type": "positive", "toast": True})
+        else:
+            self.ctx.emit("system:notify", {"title": "Repository Sync", "message": "Some repositories failed to sync. Check logs.", "type": "negative", "toast": True})
 
     async def _on_git_status(self, payload: dict):
         repo_id = payload.get("repo_id")
@@ -385,26 +413,62 @@ class DeploymentEngine:
 
     async def reconcile_orphaned_runners(self, job_id=None):
         try:
-            proc = await asyncio.create_subprocess_exec("docker", "ps", "-a", "--filter", "name=^aac-runner-", "--format", "{{.Names}}", stdout=asyncio.subprocess.PIPE)
+            # Fetch exactly which Job ID the runner belongs to using its internal Docker Labels
+            proc = await asyncio.create_subprocess_exec(
+                "docker", "ps", "-a", "--filter", "name=^aac-runner-", 
+                "--format", "{{.Names}}|{{.Label \"iac_job_id\"}}|{{.Label \"iac_task_name\"}}", 
+                stdout=asyncio.subprocess.PIPE
+            )
             stdout, _ = await proc.communicate()
-            containers = [c.strip() for c in stdout.decode().split('\n') if c.strip()]
-            if not containers: return
+            lines = [c.strip() for c in stdout.decode().split('\n') if c.strip()]
+            if not lines: return
 
-            log.info(f"Reconciliation: Found {len(containers)} orphaned runners. Reattaching...")
+            log.info(f"Reconciliation: Found {len(lines)} orphaned runners. Reattaching...")
             self.state["is_running"] = True
             
-            for c_name in containers:
-                task_name = c_name.replace("aac-runner-", "")
+            for line in lines:
+                parts = line.split('|')
+                c_name = parts[0]
+                try:
+                    recovered_job_id = int(parts[1]) if len(parts) > 1 and parts[1] else (job_id or 0)
+                except ValueError:
+                    recovered_job_id = job_id or 0
+                    
+                task_name = parts[2] if len(parts) > 2 and parts[2] else c_name.replace("aac-runner-", "")
+                
                 if "active_tasks" not in self.state: self.state["active_tasks"] = {}
                 if task_name not in self.state["active_tasks"]:
-                    self.state["active_tasks"][task_name] = {"status": "running_ansible", "logs": []}
-                # Pass job_id=0 if we don't know it, log will output to job_0.log
-                asyncio.create_task(self._watch_detached_runner(c_name, task_name, job_id=0))
+                    self.state["active_tasks"][task_name] = {
+                        "status": "running_ansible", 
+                        "logs": [],
+                        "job_id": recovered_job_id
+                    }
+                
+                self.state["running_jobs"] = self.state.get("running_jobs", 0) + 1
+                asyncio.create_task(self._reconcile_and_finalize(c_name, task_name, recovered_job_id))
         except Exception as e: log.error(f"Failed to reconcile: {e}")
+
+    async def _reconcile_and_finalize(self, c_name: str, task_name: str, job_id: int):
+        """Wrapper to safely close out a recovered job in the database after the runner finishes."""
+        success, _ = await self._watch_detached_runner(c_name, task_name, job_id)
+        
+        if job_id != 0:
+            job = next((j for j in self.db.get_jobs_by_status("RUNNING") if j.id == job_id), None)
+            if job:
+                final_status = "SUCCESS" if success else "FAILED"
+                self.state["last_deployment"] = final_status
+                self.db.update_progress(job_id, progress=100 if success else None, current_step="Reconciled & Completed" if success else "Reconciled & Failed")
+                self.db.update_job(job_id, final_status)
+                self.ctx.emit("system:notify", {"id": f"job_{job_id}", "action": "clear"})
+                self.ctx.emit("system:notify", {"title": f"Pipeline #{job_id}", "message": f"Recovered job finished.", "type": "positive" if success else "negative", "toast": True})
+                
+        self.state["running_jobs"] = max(0, self.state.get("running_jobs", 0) - 1)
+        self.state["is_running"] = self.state["running_jobs"] > 0
 
     async def _watch_detached_runner(self, container_name: str, task_name: str, job_id: int):
         successful_hosts, failed_hosts = 0, 0
         log_file = self.config.get_log_path(job_id)
+        ansible_progress = 50.0  # Base progress for Ansible phase
         
         try:
             log_proc = await asyncio.create_subprocess_exec("docker", "logs", "-f", container_name, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
@@ -420,7 +484,8 @@ class DeploymentEngine:
                     # 2. MICRO-PROGRESS SNIFFER
                     if "TASK [" in decoded:
                         ansible_task = decoded.split("TASK [")[1].split("]")[0]
-                        self.db.update_progress(job_id, progress=None, current_step=f"Ansible: {ansible_task}")
+                        ansible_progress = min(99.0, ansible_progress + 1.5)  # Increment slightly per task, capping at 99%
+                        self.db.update_progress(job_id, progress=int(ansible_progress), current_step=f"Ansible: {ansible_task}")
 
                     # 3. LIGHTWEIGHT UI MEMORY (Keep only the last 50 lines for the active popup)
                     if "active_tasks" in self.state and task_name in self.state["active_tasks"]:
