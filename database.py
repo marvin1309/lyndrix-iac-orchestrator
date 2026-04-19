@@ -1,11 +1,9 @@
 import json
 from datetime import datetime
+from core.api import db_instance
 from core.logger import get_logger
 from .models import IaCJob, IaCState
 from sqlalchemy import or_
-
-# Import your central database instance
-from core.components.database.logic.db_service import db_instance
 
 log = get_logger("IaC:Database")
 

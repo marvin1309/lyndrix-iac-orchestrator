@@ -445,7 +445,10 @@ class DeploymentEngine:
                     }
                 
                 self.state["running_jobs"] = self.state.get("running_jobs", 0) + 1
-                asyncio.create_task(self._reconcile_and_finalize(c_name, task_name, recovered_job_id))
+                self.ctx.create_task(
+                    self._reconcile_and_finalize(c_name, task_name, recovered_job_id),
+                    name=f"iac:reconcile:{recovered_job_id}:{task_name}"
+                )
         except Exception as e: log.error(f"Failed to reconcile: {e}")
 
     async def _reconcile_and_finalize(self, c_name: str, task_name: str, job_id: int):

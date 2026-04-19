@@ -1,14 +1,13 @@
 import asyncio
-from nicegui import ui, app as nicegui_app
+from nicegui import ui
 from ui.layout import main_layout
-from core.components.plugins.logic.models import ModuleManifest
+from core.api import ModuleManifest, db_instance
 from .api import iac_api_router, init_api
 from .engine import DeploymentEngine
 from .ui_dashboard import render_dashboard
 from .ui_settings import render_settings_ui as modular_settings_ui
 from .database import JobDatabase
 from .models import IaCJob, Base
-from core.components.database.logic.db_service import db_instance
 from .config import IaCConfig
 
 # ==========================================
@@ -22,7 +21,11 @@ manifest = ModuleManifest(
     author="Lyndrix",
     icon="rocket_launch", 
     type="PLUGIN",
+    min_core_version="1.0.0",
+    auto_enable_on_install=False,
+    repo_url="https://github.com/marvin1309/lyndrix-iac-orchestrator",
     ui_route="/iac",
+    dependencies=[{"id": "lyndrix.service.git", "version_constraint": ">=0.1.1"}],
     permissions={
         "subscribe": ["vault:ready_for_data", "iac:webhook_verified", "git:status_update", "db:connected"], 
         "emit": ["iac:pipeline_started", "iac:webhook_verified", "git:sync", "git:commit_push", "system:notify", "user:notify"]
@@ -40,6 +43,38 @@ plugin_state = {
     "is_running": False,
     "active_tasks": {}
 }
+
+
+def _register_api_routes(fastapi_app):
+    """Ensure the orchestrator API routes exist ahead of NiceGUI's catch-all mount."""
+    api_prefix = "/api/iac"
+    routes = list(fastapi_app.router.routes)
+    existing_api_routes = [
+        route for route in routes if getattr(route, "path", "").startswith(api_prefix)
+    ]
+
+    if not existing_api_routes:
+        fastapi_app.include_router(iac_api_router)
+        routes = list(fastapi_app.router.routes)
+        existing_api_routes = [
+            route for route in routes if getattr(route, "path", "").startswith(api_prefix)
+        ]
+
+    if not existing_api_routes:
+        return
+
+    remaining_routes = [route for route in routes if route not in existing_api_routes]
+    root_mount_index = next(
+        (index for index, route in enumerate(remaining_routes) if getattr(route, "path", None) == ""),
+        len(remaining_routes),
+    )
+    reordered_routes = (
+        remaining_routes[:root_mount_index]
+        + existing_api_routes
+        + remaining_routes[root_mount_index:]
+    )
+    fastapi_app.router.routes = reordered_routes
+    fastapi_app.openapi_schema = None
 
 # ==========================================
 # 3. SETTINGS INJECTION
@@ -66,7 +101,7 @@ def render_dashboard_widget(ctx):
 # ==========================================
 # 4. PLUGIN BOOT SEQUENCE
 # ==========================================
-async def setup(ctx):
+def setup(ctx):
     ctx.log.info("IaC Orchestrator: Executing async setup sequence...")
     
     config = IaCConfig(ctx)
@@ -79,8 +114,9 @@ async def setup(ctx):
     # Initialize the API with the engine instance
     init_api(ctx, engine)
     
-    # Attach router to NiceGUI directly (Fixes the previous ctx.app crash)
-    nicegui_app.include_router(iac_api_router)
+    # Attach API routes to the underlying FastAPI app before NiceGUI's root mount.
+    from main import app as fastapi_app
+    _register_api_routes(fastapi_app)
     
     def init_db_tables():
         if db_instance.is_connected and db_instance.engine:
@@ -105,7 +141,7 @@ async def setup(ctx):
     
     @ctx.subscribe('iac:webhook_verified')
     async def on_webhook(payload):
-        asyncio.create_task(engine.run_pipeline(payload))
+        ctx.create_task(engine.run_pipeline(payload), name="iac:run_pipeline")
         
     # --- START RECONCILIATION ---
     async def run_reconciliation():
@@ -118,7 +154,10 @@ async def setup(ctx):
         for job in interrupted_jobs:
             remaining_services = job_db.get_pending_tasks(job.id)
             if remaining_services:
-                asyncio.create_task(engine.resume_bulk_rollout(job.id, remaining_services))
+                ctx.create_task(
+                    engine.resume_bulk_rollout(job.id, remaining_services),
+                    name=f"iac:resume:{job.id}"
+                )
             elif not any(t.get("job_id") == job.id for t in engine.state.get("active_tasks", {}).values()):
                 # If the job has no pending tasks AND no orphaned runners reattached to it,
                 # the container was completely destroyed. We must close it out so it doesn't hang.
@@ -128,7 +167,7 @@ async def setup(ctx):
                 plugin_state["last_deployment"] = "FAILED"
 
     # Spawn reconciliation instantly in the background
-    asyncio.create_task(run_reconciliation())
+    ctx.create_task(run_reconciliation(), name="iac:startup_reconciliation")
         
     # --- REGISTER UI ROUTE ---
     # Because this is inside setup(), it acts as a closure and permanently locks 

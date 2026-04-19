@@ -2,7 +2,6 @@ import hmac
 import yaml
 from fastapi import APIRouter, Request, Header, HTTPException
 from pydantic import BaseModel
-from nicegui import ui
 
 iac_api_router = APIRouter(prefix="/api/iac", tags=["IaC Orchestrator"])
 
@@ -15,6 +14,21 @@ def init_api(ctx, engine):
     global _ctx, _engine
     _ctx = ctx
     _engine = engine
+
+
+@iac_api_router.get("/health")
+async def health_check():
+    """Returns a lightweight health snapshot for the orchestrator plugin."""
+    if not _ctx or not _engine:
+        raise HTTPException(status_code=503, detail="Orchestrator not initialized")
+
+    return {
+        "status": "healthy",
+        "version": getattr(_ctx.manifest, "version", "unknown"),
+        "db_connected": bool(getattr(_engine.db, "engine", None)),
+        "vault_ready": _ctx.get_secret("iac_auto_apply") is not None,
+        "active_workers": len((_engine.state or {}).get("active_tasks", {})),
+    }
 
 @iac_api_router.post("/webhook/gitlab")
 async def gitlab_webhook(request: Request, x_gitlab_token: str = Header(None)):

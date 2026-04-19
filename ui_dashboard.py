@@ -156,7 +156,7 @@ async def render_dashboard(ctx, state, engine, config):
         with ui.row().classes('w-full justify-between items-center'):
             ui.label('GitOps Dashboard').classes(UIStyles.TITLE_H2)
             with ui.row().classes('gap-3'):
-                ui.button('Resync Repositories', on_click=lambda: asyncio.create_task(engine.sync_core_repos()), icon='sync', color='blue-6').props('unelevated rounded size=sm').bind_enabled_from(state, 'is_running', backward=lambda x: not x)
+                ui.button('Resync Repositories', on_click=lambda: engine.ctx.create_task(engine.sync_core_repos(), name='iac:sync_core_repos'), icon='sync', color='blue-6').props('unelevated rounded size=sm').bind_enabled_from(state, 'is_running', backward=lambda x: not x)
                 ui.button('ABORT', on_click=abort_execution, icon='dangerous', color='red-6').props('unelevated rounded size=sm').bind_visibility_from(state, 'is_running')
 
         with ui.tabs().classes(UIStyles.TAB_BAR) as tabs:
