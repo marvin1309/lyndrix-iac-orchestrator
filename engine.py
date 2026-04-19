@@ -579,8 +579,12 @@ class DeploymentEngine:
             self.state["active_tasks"][task_name]["status"] = "running_ansible"
 
             proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
-            await proc.communicate()
+            stdout, _ = await proc.communicate()
             
+            if proc.returncode != 0:
+                error_msg = stdout.decode('utf-8', errors='replace').strip()
+                raise RuntimeError(f"Failed to spawn Docker runner container: {error_msg}")
+
             return await self._watch_detached_runner(c_name, task_name, job_id)
         except Exception as e:
             log.error(f"Docker Execution Error: {e}")
