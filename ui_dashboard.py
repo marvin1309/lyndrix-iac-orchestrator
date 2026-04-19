@@ -153,11 +153,12 @@ async def render_dashboard(ctx, state, engine, config):
         update_log_content()
 
     with ui.column().classes('w-full gap-6'):
-        with ui.row().classes('w-full justify-between items-center'):
-            ui.label('GitOps Dashboard').classes(UIStyles.TITLE_H2)
-            with ui.row().classes('gap-3'):
-                ui.button('Resync Repositories', on_click=lambda: engine.ctx.create_task(engine.sync_core_repos(), name='iac:sync_core_repos'), icon='sync', color='blue-6').props('unelevated rounded size=sm').bind_enabled_from(state, 'is_running', backward=lambda x: not x)
-                ui.button('ABORT', on_click=abort_execution, icon='dangerous', color='red-6').props('unelevated rounded size=sm').bind_visibility_from(state, 'is_running')
+        with ui.row().classes('w-full items-center gap-4'):
+            ui.element('div').classes('h-12 w-1 bg-gradient-to-b from-indigo-400 to-violet-400')
+            with ui.column().classes('gap-0 flex-grow'):
+                ui.label('GitOps Dashboard').classes(UIStyles.TITLE_H2)
+            ui.button('Resync Repositories', on_click=lambda: engine.ctx.create_task(engine.sync_core_repos(), name='iac:sync_core_repos'), icon='sync', color='blue-6').props('unelevated rounded size=sm').bind_enabled_from(state, 'is_running', backward=lambda x: not x)
+            ui.button('ABORT', on_click=abort_execution, icon='dangerous', color='red-6').props('unelevated rounded size=sm').bind_visibility_from(state, 'is_running')
 
         with ui.tabs().classes(UIStyles.TAB_BAR) as tabs:
             overview_tab = ui.tab('Overview', icon='dashboard')
@@ -229,33 +230,35 @@ async def render_dashboard(ctx, state, engine, config):
                                 match = not term or term in name.lower() or term in repo_name.lower() or term in target_node.lower()
                                 
                                 if match:
-                                    with ui.card().classes(f'{UIStyles.CARD_BASE} flex flex-col hover:border-indigo-500 transition-colors'):
-                                        with ui.row().classes('w-full justify-between items-start'):
-                                            with ui.column().classes('gap-0'):
-                                                ui.label(name).classes('text-md font-bold truncate')
-                                                ui.label(f"Repo: {repo_name}").classes(f'{UIStyles.TEXT_MUTED} text-[10px] truncate')
-                                        
-                                            if "compose" in deploy_type.lower():
-                                                ui.html('<svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor"><path d="M6.1,10L0,10.1V13h6.1V10z M13.1,10H7v3h6.1V10z M20.1,10H14v3h6.1V10z M13.1,3H7v3h6.1V3z"/></svg>').classes('text-indigo-400 w-6 h-6').tooltip("Docker Compose")
-                                            else:
-                                                ui.icon('settings_applications', color='slate-400').classes('text-xl').tooltip(deploy_type)
+                                    with ui.card().classes(f'{UIStyles.CARD_BASE} flex flex-col hover:border-indigo-500 transition-colors').style('padding: 0; flex-wrap: nowrap'):
+                                        ui.element('div').classes('h-1 w-full bg-gradient-to-r from-sky-400 via-cyan-400 to-indigo-400')
+                                        with ui.column().classes('w-full flex-grow p-4 gap-2'):
+                                            with ui.row().classes('w-full justify-between items-start'):
+                                                with ui.column().classes('gap-0'):
+                                                    ui.label(name).classes('text-md font-bold truncate')
+                                                    ui.label(f"Repo: {repo_name}").classes(f'{UIStyles.TEXT_MUTED} text-[10px] truncate')
 
-                                        ui.separator().classes('my-2 opacity-20')
-                                            
-                                        with ui.row().classes('w-full justify-between items-center'):
-                                            with ui.row().classes('items-center gap-1'):
-                                                ui.icon('dns', size='12px').classes('text-slate-400')
-                                                ui.label(target_node).classes('text-xs text-slate-500 font-mono')
-                                            
-                                            with ui.row().classes('items-center gap-1'):
-                                                ui.icon('call_split', size='12px').classes('text-slate-400')
-                                                ui.label(branch).classes('text-xs text-slate-500 font-mono')
-                                        
-                                        ui.separator().classes('mt-auto mb-3 opacity-20')
-                                        
-                                        with ui.row().classes('w-full justify-between items-center gap-2'):
-                                            ui.button(icon='history', on_click=lambda n=name: [svc_history_title.set_text(f"Deployment History: {n}"), setattr(svc_history_table, 'rows', engine.db.get_service_history(n)), svc_history_dialog.open()]).props('flat round size=sm color=zinc-500').tooltip("View Deployment History")
-                                            ui.button('Deploy', icon='rocket', on_click=lambda n=name, b=branch: ctx.emit("iac:webhook_verified", {"pipeline_type": "single_service", "service_name": n, "service_branch": b, "manual": True})).props('unelevated rounded size=sm color=indigo')
+                                                if "compose" in deploy_type.lower():
+                                                    ui.html('<svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor"><path d="M6.1,10L0,10.1V13h6.1V10z M13.1,10H7v3h6.1V10z M20.1,10H14v3h6.1V10z M13.1,3H7v3h6.1V3z"/></svg>').classes('text-indigo-400 w-6 h-6').tooltip("Docker Compose")
+                                                else:
+                                                    ui.icon('settings_applications', color='slate-400').classes('text-xl').tooltip(deploy_type)
+
+                                            ui.separator().classes('my-2 opacity-20')
+
+                                            with ui.row().classes('w-full justify-between items-center'):
+                                                with ui.row().classes('items-center gap-1'):
+                                                    ui.icon('dns', size='12px').classes('text-slate-400')
+                                                    ui.label(target_node).classes('text-xs text-slate-500 font-mono')
+
+                                                with ui.row().classes('items-center gap-1'):
+                                                    ui.icon('call_split', size='12px').classes('text-slate-400')
+                                                    ui.label(branch).classes('text-xs text-slate-500 font-mono')
+
+                                            ui.separator().classes('mt-auto mb-3 opacity-20')
+
+                                            with ui.row().classes('w-full justify-between items-center gap-2'):
+                                                ui.button(icon='history', on_click=lambda n=name: [svc_history_title.set_text(f"Deployment History: {n}"), setattr(svc_history_table, 'rows', engine.db.get_service_history(n)), svc_history_dialog.open()]).props('flat round size=sm color=zinc-500').tooltip("View Deployment History")
+                                                ui.button('Deploy', icon='rocket', on_click=lambda n=name, b=branch: ctx.emit("iac:webhook_verified", {"pipeline_type": "single_service", "service_name": n, "service_branch": b, "manual": True})).props('unelevated rounded size=sm color=indigo')
 
                     catalog_search.on('update:model-value', render_catalog_cards)
                     render_catalog_cards()
@@ -314,16 +317,18 @@ async def render_dashboard(ctx, state, engine, config):
                                             with ui.grid(columns='repeat(auto-fill, minmax(350px, 1fr))').classes('w-full gap-4'):
                                                 for item in items:
                                                     host, svcs = item['host'], item['services']
-                                                    with ui.card().classes(f'{UIStyles.CARD_BASE} flex flex-col gap-2 hover:border-indigo-500/50 transition-all p-4'):
-                                                        with ui.row().classes('w-full justify-between items-center border-b border-zinc-800/50 pb-2'):
-                                                            with ui.row().classes('items-center gap-2'):
-                                                                ui.icon('dns', size='18px').classes('text-slate-400')
-                                                                ui.label(host).classes('text-md font-bold text-slate-800 dark:text-slate-300 truncate max-w-[150px]').tooltip(host)
-                                                            ui.button('Deploy Host', icon='rocket', on_click=lambda h=host: ctx.emit("iac:webhook_verified", {"pipeline_type": "rollout", "limit": h, "manual": True})).props('unelevated rounded size=sm color=indigo').tooltip(f"Deploy to {host}").bind_enabled_from(state, 'is_running', backward=lambda x: not x)
-                                                        
-                                                        with ui.row().classes('gap-1.5 pt-1'):
-                                                            for svc in svcs:
-                                                                ui.chip(svc, icon='apps', color='zinc-800').props('text-color=slate-300 size=sm')
+                                                    with ui.card().classes(f'{UIStyles.CARD_BASE} flex flex-col gap-2 hover:border-indigo-500/50 transition-all').style('padding: 0; flex-wrap: nowrap'):
+                                                        ui.element('div').classes('h-1 w-full bg-gradient-to-r from-emerald-400 via-teal-400 to-green-400')
+                                                        with ui.column().classes('w-full flex-grow p-4 gap-2'):
+                                                            with ui.row().classes('w-full justify-between items-center border-b border-zinc-800/50 pb-2'):
+                                                                with ui.row().classes('items-center gap-2'):
+                                                                    ui.icon('dns', size='18px').classes('text-slate-400')
+                                                                    ui.label(host).classes('text-md font-bold text-slate-800 dark:text-slate-300 truncate max-w-[150px]').tooltip(host)
+                                                                ui.button('Deploy Host', icon='rocket', on_click=lambda h=host: ctx.emit("iac:webhook_verified", {"pipeline_type": "rollout", "limit": h, "manual": True})).props('unelevated rounded size=sm color=indigo').tooltip(f"Deploy to {host}").bind_enabled_from(state, 'is_running', backward=lambda x: not x)
+
+                                                            with ui.row().classes('gap-1.5 pt-1'):
+                                                                for svc in svcs:
+                                                                    ui.chip(svc, icon='apps', color='zinc-800').props('text-color=slate-300 size=sm')
                     
                     assignment_wrapper = ui.column().classes('w-full')
                     search_input.on('update:model-value', render_cards)
@@ -360,24 +365,26 @@ async def render_dashboard(ctx, state, engine, config):
             with jobs_grid:
                 for job in running_jobs:
                     if job.id not in active_job_cards:
-                        with ui.card().classes(f'{UIStyles.CARD_GLASS} border-indigo-500/50 flex flex-col p-4 shadow-2xl') as c:
-                            with ui.row().classes('w-full justify-between items-start'):
-                                with ui.column().classes('gap-0'):
-                                    ui.label(f"Pipeline #{job.id}").classes('text-lg font-bold text-indigo-400')
-                                    ui.label(job.pipeline_type).classes('text-[10px] uppercase text-slate-500 font-black tracking-widest')
-                                ui.spinner('tail', size='2em', color='indigo')
-                            
-                            with ui.linear_progress(value=(job.progress or 0)/100.0, show_value=False).props('color=indigo rounded stripe size=20px').classes('mt-4 relative') as p_bar:
-                                pct_lbl = ui.label(f"{int(job.progress or 0)}%").classes('absolute-center text-[11px] font-bold text-white drop-shadow-md')
-                            with ui.row().classes('w-full mt-1'):
-                                step_lbl = ui.label(job.current_step).classes('text-[11px] font-mono text-slate-300 truncate w-full')
-                            
-                            ui.label("Active Runners").classes('text-[10px] uppercase text-zinc-600 font-bold mt-4 mb-1')
-                            runner_box = ui.column().classes('w-full gap-1 p-2 bg-black/40 rounded border border-zinc-800/50')
-                            
-                            with ui.row().classes('w-full mt-4 pt-2 border-t border-zinc-800 justify-between'):
-                                ui.button('Live Logs', icon='terminal', on_click=lambda j=job.id: open_live_logs(j)).props('flat rounded size=sm color=green')
-                                ui.button('Abort', icon='stop', on_click=abort_execution).props('flat rounded size=sm color=red')
+                        with ui.card().classes(f'{UIStyles.CARD_GLASS} flex flex-col shadow-2xl').style('padding: 0; flex-wrap: nowrap') as c:
+                            ui.element('div').classes('h-1 w-full bg-gradient-to-r from-indigo-400 via-violet-400 to-purple-400')
+                            with ui.column().classes('w-full flex-grow p-4 gap-0'):
+                                with ui.row().classes('w-full justify-between items-start'):
+                                    with ui.column().classes('gap-0'):
+                                        ui.label(f"Pipeline #{job.id}").classes('text-lg font-bold text-indigo-400')
+                                        ui.label(job.pipeline_type).classes('text-[10px] uppercase text-slate-500 font-black tracking-widest')
+                                    ui.spinner('tail', size='2em', color='indigo')
+
+                                with ui.linear_progress(value=(job.progress or 0)/100.0, show_value=False).props('color=indigo rounded stripe size=20px').classes('mt-4 relative') as p_bar:
+                                    pct_lbl = ui.label(f"{int(job.progress or 0)}%").classes('absolute-center text-[11px] font-bold text-white drop-shadow-md')
+                                with ui.row().classes('w-full mt-1'):
+                                    step_lbl = ui.label(job.current_step).classes('text-[11px] font-mono text-slate-300 truncate w-full')
+
+                                ui.label("Active Runners").classes('text-[10px] uppercase text-zinc-600 font-bold mt-4 mb-1')
+                                runner_box = ui.column().classes('w-full gap-1 p-2 bg-black/40 border border-zinc-800/50')
+
+                                with ui.row().classes('w-full mt-4 pt-2 border-t border-zinc-800 justify-between'):
+                                    ui.button('Live Logs', icon='terminal', on_click=lambda j=job.id: open_live_logs(j)).props('flat rounded size=sm color=green')
+                                    ui.button('Abort', icon='stop', on_click=abort_execution).props('flat rounded size=sm color=red')
                             
                         active_job_cards[job.id] = {"card": c, "bar": p_bar, "step": step_lbl, "pct": pct_lbl, "runners": runner_box}
                     else:
