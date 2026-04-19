@@ -17,7 +17,7 @@ from .config import IaCConfig
 manifest = ModuleManifest(
     id="lyndrix.plugin.iac_orchestrator",
     name="IaC Orchestrator",
-    version="0.2.3",
+    version="0.2.4",
     description="Standalone GitOps controller for executing Terraform and Ansible pipelines.",
     author="Lyndrix",
     icon="rocket_launch", 

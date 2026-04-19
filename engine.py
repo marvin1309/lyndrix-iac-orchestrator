@@ -217,7 +217,7 @@ class DeploymentEngine:
         
         pipeline = [
             SyncRepoStage("iac_controller"), SyncRepoStage("inventory_state"), 
-            SyncRepoStage("config_engine"), NativeGenerateStage(), 
+            SyncRepoStage("config_engine"), SyncRepoStage("aac_factory"), NativeGenerateStage(), 
             CommitPushStage("inventory_state", "ci: automated state update")
         ]
         
@@ -325,7 +325,7 @@ class DeploymentEngine:
         self.ctx.emit("system:notify", {"id": "sys_repo_sync", "title": "Repository Sync", "message": "Synchronizing core repositories...", "type": "ongoing", "toast": False})
         
         all_success = True
-        for repo in ["iac_controller", "inventory_state", "config_engine"]:
+        for repo in ["iac_controller", "inventory_state", "config_engine", "aac_factory"]:
             success = await self.execute_git_sync(repo)
             if not success:
                 log.warning(f"Failed to sync {repo} during background operation.")
@@ -561,7 +561,7 @@ class DeploymentEngine:
                 "-e", f"IAC_JOB_ID={job_id}",
                 "-v", f"{h_git}:/data/storage/git_repos", "-v", f"{h_svc}:/data/storage/services",
                 "-e", "ANSIBLE_HOST_KEY_CHECKING=False", "-e", "PYTHONUNBUFFERED=1", "-e", "ANSIBLE_NOCOLOR=1", "-e", "ANSIBLE_DEPRECATION_WARNINGS=0", "-e", "ANSIBLE_INTERPRETER_PYTHON=auto_silent",
-                "-e", "ANSIBLE_ROLES_PATH=/data/storage/git_repos/config_engine/roles", "-e", "PYTHONPATH=/opt/aac-template-engine/scripts",
+                "-e", "ANSIBLE_ROLES_PATH=/data/storage/git_repos/config_engine/roles", "-e", "PYTHONPATH=/data/storage/git_repos/aac_factory/scripts",
                 "--entrypoint", "",
                 self.config.ansible_docker_image,
                 "/bin/sh", "-c", 
