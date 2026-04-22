@@ -7,6 +7,7 @@ import logging
 import shutil
 import uuid
 import yaml
+from hashlib import sha256
 from pathlib import Path
 from core.logger import get_logger
 from core.bus import bus
@@ -35,6 +36,7 @@ class NativeGenerateStage:
     async def run(self, engine, context: dict) -> StageResult:
         try:
             await engine._execute_native_generation()
+            await engine.emit_monitoring_inventory_sync()
             return StageResult(True, "Native artifacts generated.")
         except Exception as e:
             return StageResult(False, f"Native generation failed: {e}")
@@ -176,6 +178,164 @@ class DeploymentEngine:
                 limit="docker-hydra"
             )
         ]
+
+    def _load_generated_inventory(self) -> dict:
+        inventory_path = self.base_git_dir / "inventory_state" / "global" / "ansible" / "inventory.yml"
+        if not inventory_path.exists():
+            return {}
+        with open(inventory_path, "r", encoding="utf-8") as handle:
+            return yaml.safe_load(handle) or {}
+
+    def _load_service_docker_names(self) -> dict:
+        """Build a slug→docker_name mapping by reading service.yml files in services_dir."""
+        mapping: dict[str, str] = {}
+
+        def _normalize_slug(raw: str) -> str:
+            return "".join(ch for ch in str(raw or "").lower() if ch.isalnum())
+
+        def _slug_aliases(raw: str) -> set[str]:
+            # Accept common slug variants (hyphen/underscore/case) from generated inventory.
+            base = str(raw or "").strip()
+            if not base:
+                return set()
+            aliases = {
+                base,
+                base.lower(),
+                base.replace("-", "_"),
+                base.replace("_", "-"),
+                base.lower().replace("-", "_"),
+                base.lower().replace("_", "-"),
+            }
+            return {a for a in aliases if a}
+
+        candidate_dirs: list[Path] = []
+        for path_candidate in [
+            self.config.services_dir,
+            Path(getattr(self.config, "host_services_dir", "")),
+            Path("/app/.dev/storage/services"),
+            Path("/workspace/.dev/storage/services"),
+            Path.cwd() / ".dev" / "storage" / "services",
+        ]:
+            if path_candidate and path_candidate.exists() and path_candidate.is_dir():
+                candidate_dirs.append(path_candidate)
+
+        # Deduplicate while preserving order so the configured path wins.
+        seen_dirs: set[str] = set()
+        unique_dirs: list[Path] = []
+        for d in candidate_dirs:
+            key = str(d.resolve())
+            if key in seen_dirs:
+                continue
+            seen_dirs.add(key)
+            unique_dirs.append(d)
+
+        for services_dir in unique_dirs:
+            for svc_yml in services_dir.rglob("service.yml"):
+                try:
+                    with open(svc_yml, "r", encoding="utf-8") as fh:
+                        data = yaml.safe_load(fh) or {}
+                    docker_name = (data.get("service") or {}).get("name")
+                    slug = svc_yml.parent.name
+                    if docker_name and slug:
+                        for alias in _slug_aliases(slug):
+                            mapping[alias] = docker_name
+                        mapping[_normalize_slug(slug)] = docker_name
+                except Exception:
+                    continue
+
+        if mapping:
+            log.info(f"MONITORING: loaded {len(mapping)} service slug aliases for container-name mapping")
+        return mapping
+
+    def _build_monitoring_inventory_payload(self, inventory: dict) -> dict:
+        all_hosts = (inventory.get("all") or {}).get("hosts") or {}
+        children = (inventory.get("all") or {}).get("children") or {}
+        host_groups: dict[str, list[str]] = {}
+        for group_name, group_data in children.items():
+            for host_name in (group_data.get("hosts") or {}).keys():
+                host_groups.setdefault(host_name, []).append(group_name)
+
+        docker_name_map = self._load_service_docker_names()
+
+        def _resolve_docker_name(slug: str) -> str:
+            direct = docker_name_map.get(slug)
+            if direct:
+                return direct
+            normalized = "".join(ch for ch in str(slug or "").lower() if ch.isalnum())
+            return docker_name_map.get(normalized) or slug
+
+        hosts = []
+        services = []
+        for host_name, host_data in all_hosts.items():
+            groups = sorted(host_groups.get(host_name, []))
+            stage = next((group[len("stage_"):] for group in groups if group.startswith("stage_")), None)
+            site = next((group[len("site_"):] for group in groups if group.startswith("site_")), None)
+            hosts.append(
+                {
+                    "host_name": host_name,
+                    "hostname": host_data.get("hostname") or host_name,
+                    "address": host_data.get("ansible_host"),
+                    "ansible_host": host_data.get("ansible_host"),
+                    "groups": groups,
+                    "ansible_groups": groups,
+                    "baseline_roles": host_data.get("baseline_roles") or [],
+                    "profiles": host_data.get("profiles") or [],
+                    "terraform": host_data.get("terraform") or {},
+                    "site": site,
+                    "stage": stage,
+                }
+            )
+
+            for service in host_data.get("services") or []:
+                if not isinstance(service, dict) or not service.get("name"):
+                    continue
+                slug = str(service.get("name"))
+                docker_name = _resolve_docker_name(slug)
+                services.append(
+                    {
+                        "host_name": host_name,
+                        "hostname": host_data.get("hostname") or host_name,
+                        "address": host_data.get("ansible_host"),
+                        "service_name": docker_name,
+                        "service_slug": slug,
+                        "name": docker_name,
+                        "state": service.get("state"),
+                        "desired_state": service.get("state"),
+                        "deploy_type": service.get("deploy_type"),
+                        "git_repo": service.get("git_repo"),
+                        "git_version": service.get("git_version"),
+                        "config": service.get("config") or {},
+                        "groups": groups,
+                        "ansible_groups": groups,
+                        "site": site,
+                        "stage": stage,
+                    }
+                )
+
+        source_revision = sha256(
+            json.dumps({"hosts": hosts, "services": services}, sort_keys=True, default=str).encode("utf-8")
+        ).hexdigest()
+        return {
+            "owner_source": "orchestrator_service",
+            "source_revision": source_revision,
+            "hosts": hosts,
+            "services": services,
+        }
+
+    async def emit_monitoring_inventory_sync(self):
+        try:
+            inventory = self._load_generated_inventory()
+            if not inventory:
+                return
+            payload = self._build_monitoring_inventory_payload(inventory)
+            if not payload["hosts"] and not payload["services"]:
+                return
+            self.ctx.emit("monitoring:inventory_sync", payload)
+            log.info(
+                f"MONITORING: Emitted generated inventory sync with {len(payload['hosts'])} hosts and {len(payload['services'])} services."
+            )
+        except Exception as exc:
+            log.error(f"MONITORING: Failed to emit inventory sync: {exc}")
 
     async def run_pipeline(self, payload: dict):
         if not payload.get("pipeline_type") and payload.get("object_kind") == "push":
@@ -419,7 +579,15 @@ class DeploymentEngine:
                 "--format", "{{.Names}}|{{.Label \"iac_job_id\"}}|{{.Label \"iac_task_name\"}}", 
                 stdout=asyncio.subprocess.PIPE
             )
-            stdout, _ = await proc.communicate()
+            try:
+                stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=12)
+            except asyncio.TimeoutError:
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+                log.warning("Reconciliation: docker ps timed out after 12s; skipping orphaned runner scan.")
+                return
             lines = [c.strip() for c in stdout.decode().split('\n') if c.strip()]
             if not lines: return
 

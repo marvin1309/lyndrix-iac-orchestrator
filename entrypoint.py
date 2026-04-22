@@ -16,19 +16,19 @@ from .config import IaCConfig
 manifest = ModuleManifest(
     id="lyndrix.plugin.iac_orchestrator",
     name="IaC Orchestrator",
-    version="0.2.6",
+    version="0.2.7",
     description="Standalone GitOps controller for executing Terraform and Ansible pipelines.",
     author="Lyndrix",
     icon="rocket_launch", 
     type="PLUGIN",
-    min_core_version="1.0.0",
+    min_core_version="0.0.1",
     auto_enable_on_install=False,
     repo_url="https://github.com/marvin1309/lyndrix-iac-orchestrator",
     ui_route="/iac",
     dependencies=[{"id": "lyndrix.service.git", "version_constraint": ">=0.1.1"}],
     permissions={
         "subscribe": ["vault:ready_for_data", "iac:webhook_verified", "git:status_update", "db:connected"], 
-        "emit": ["iac:pipeline_started", "iac:webhook_verified", "git:sync", "git:commit_push", "system:notify", "user:notify"]
+        "emit": ["iac:pipeline_started", "iac:webhook_verified", "git:sync", "git:commit_push", "system:notify", "user:notify", "monitoring:inventory_sync"]
     }
 )
 
@@ -147,7 +147,14 @@ def setup(ctx):
     async def run_reconciliation():
         await asyncio.sleep(2) # Give the DB a moment to wake up
         ctx.log.info("IaC Orchestrator: Checking for surviving Docker runners...")
-        await engine.reconcile_orphaned_runners()
+        try:
+            await asyncio.wait_for(engine.reconcile_orphaned_runners(), timeout=20)
+        except asyncio.TimeoutError:
+            ctx.log.warning("IaC Orchestrator: Runner reconciliation timed out after 20s, continuing startup.")
+        except Exception as e:
+            ctx.log.error(f"IaC Orchestrator: Runner reconciliation failed: {e}")
+        finally:
+            ctx.log.info("IaC Orchestrator: Startup reconciliation scan finished.")
 
         # Resume any pending tasks in the database queue
         interrupted_jobs = job_db.get_jobs_by_status("RUNNING")
@@ -168,6 +175,7 @@ def setup(ctx):
 
     # Spawn reconciliation instantly in the background
     ctx.create_task(run_reconciliation(), name="iac:startup_reconciliation")
+    ctx.create_task(engine.emit_monitoring_inventory_sync(), name="iac:monitoring_inventory_seed")
         
     # --- REGISTER UI ROUTE ---
     # Because this is inside setup(), it acts as a closure and permanently locks 
