@@ -7,6 +7,49 @@ from ..utils import StageResult
 
 log = get_logger("IaC:Engine:Ansible")
 
+# --- single-service rollout routing (deploy_type) ---------------------------
+# Both playbooks live in the SAME "service" category / trigger endpoints; only
+# the executed playbook differs, switched per service by services[].deploy_type.
+SERVICE_ROLLOUT_PLAYBOOK_DOCKER = "playbooks/cd_playbooks/cd_rollout_single_service.yml"
+SERVICE_ROLLOUT_PLAYBOOK_ANSIBLE = "playbooks/cd_playbooks/cd_rollout_single_service_ansible.yml"
+# Runner-container-local staging dir the ansible rollout playbook publishes the
+# rendered (host-invariant) role tree to; appended to ANSIBLE_ROLES_PATH so the
+# entrypoint's `include_role: name=service` resolves. Must match the convention
+# in cd_rollout_single_service_ansible.yml (config_engine repo).
+ANSIBLE_BUILD_ROLES_DIR_TPL = "/tmp/aac_builds/_ansible_roles/{service}"
+
+
+def service_deploy_type(engine, service_name: str) -> str:
+    """Return the service's ``deploy_type`` from the controller service catalog.
+
+    The catalog (iac_controller/environments/global/02_service_catalog.yml) is
+    the cleanest service-granular source: it is the declarative SSoT, is already
+    parsed by the rollout stages, and playbook selection happens per SERVICE
+    (one runner per service run) while the generated inventory only carries
+    deploy_type nested per host. Defaults to 'docker_compose'.
+    """
+    catalog_file = engine.base_git_dir / "iac_controller" / "environments" / "global" / "02_service_catalog.yml"
+    try:
+        with open(catalog_file, "r") as f:
+            catalog_data = yaml.safe_load(f) or {}
+        for svc in catalog_data.get("service_catalog", {}).get("services", []):
+            if svc.get("name") == service_name:
+                return str(svc.get("deploy_type") or "docker_compose")
+    except Exception as e:
+        log.warning(f"deploy_type lookup for '{service_name}' failed ({e}); defaulting to docker_compose.")
+    return "docker_compose"
+
+
+def service_rollout_selector(engine, service_name: str) -> tuple[str, list[str]]:
+    """(playbook_path, extra_roles_paths) for a single-service rollout.
+
+    deploy_type == 'ansible' → native execution chain playbook + the per-run
+    build roles dir on ANSIBLE_ROLES_PATH; anything else → docker chain.
+    """
+    if service_deploy_type(engine, service_name) == "ansible":
+        return SERVICE_ROLLOUT_PLAYBOOK_ANSIBLE, [ANSIBLE_BUILD_ROLES_DIR_TPL.format(service=service_name)]
+    return SERVICE_ROLLOUT_PLAYBOOK_DOCKER, []
+
 
 def host_assigned_services(engine, host_name: str) -> list[str]:
     """Service names assigned to ``host_name`` via the generated inventory's
@@ -29,7 +72,7 @@ def host_assigned_services(engine, host_name: str) -> list[str]:
 
 
 class AnsiblePlaybookStage(BaseStage):
-    def __init__(self, playbook_path: str, inventory_path: str, limit: str = None, name_override: str = None, extra_vars: dict = None, ssh_key_secret: str = "ansible_ssh_key", remote_user: str = "ansible-agent"):
+    def __init__(self, playbook_path: str, inventory_path: str, limit: str = None, name_override: str = None, extra_vars: dict = None, ssh_key_secret: str = "ansible_ssh_key", remote_user: str = "ansible-agent", extra_roles_paths: list = None):
         self.display_name = name_override or f"Ansible: {playbook_path}"
         super().__init__(self.display_name)
         self.playbook_path = playbook_path
@@ -38,17 +81,21 @@ class AnsiblePlaybookStage(BaseStage):
         self.extra_vars = extra_vars or {}
         self.ssh_key_secret = ssh_key_secret
         self.remote_user = remote_user
+        # Extra dirs appended to ANSIBLE_ROLES_PATH in the runner container
+        # (native/ansible deploys: the per-run rendered build roles dir).
+        self.extra_roles_paths = extra_roles_paths or []
 
     async def run(self, engine, context: dict) -> StageResult:
         success, stats = await engine.execute_ansible_docker(
-            playbook_subpath=self.playbook_path, 
-            inventory_subpath=self.inventory_path, 
+            playbook_subpath=self.playbook_path,
+            inventory_subpath=self.inventory_path,
             limit=self.limit,
             extra_vars=self.extra_vars,
             task_name=self.display_name,
             job_id=context.get("job_id", 0),
             ssh_key_secret=self.ssh_key_secret,
             remote_user=self.remote_user,
+            extra_roles_paths=self.extra_roles_paths,
         )
         msg = "Ansible execution completed." if success else "Ansible execution failed."
         return StageResult(success, msg, data=stats)
@@ -108,7 +155,8 @@ class AsyncBulkRolloutStage(BaseStage):
                 sanitized_name = str(svc_name).replace("-", "_")
                 svc_group = f"service_{sanitized_name}"
                 eff_limit = f"{self.limit}:&{svc_group}" if self.limit and self.limit != "all" else svc_group
-                stage = AnsiblePlaybookStage(name_override=svc_name, playbook_path="playbooks/cd_playbooks/cd_rollout_single_service.yml", inventory_path=self.inventory_path, limit=eff_limit, extra_vars={"target_service": svc_name, "target_group": eff_limit, "LOCAL_SERVICES_DIR": str(engine.config.services_dir)})
+                pb_path, extra_roles = service_rollout_selector(engine, svc_name)
+                stage = AnsiblePlaybookStage(name_override=svc_name, playbook_path=pb_path, inventory_path=self.inventory_path, limit=eff_limit, extra_vars={"target_service": svc_name, "target_group": eff_limit, "LOCAL_SERVICES_DIR": str(engine.config.services_dir)}, extra_roles_paths=extra_roles)
                 res = await stage.run(engine, context)
                 report[svc_name] = {"success": res.success, "successful_hosts": res.data.get("successful_hosts", 0), "failed_hosts": res.data.get("failed_hosts", 0)}
                 if not res.success: failed_services.append(svc_name)
@@ -182,12 +230,14 @@ class ServiceDeployStage(BaseStage):
                 sanitized_name = str(svc_name).replace("-", "_")
                 svc_group = f"service_{sanitized_name}"
                 eff_limit = f"{self.host_name}:&{svc_group}"
+                pb_path, extra_roles = service_rollout_selector(engine, svc_name)
                 stage = AnsiblePlaybookStage(
-                    name_override=svc_name, 
-                    playbook_path="playbooks/cd_playbooks/cd_rollout_single_service.yml", 
-                    inventory_path="global/ansible/inventory.yml", 
-                    limit=eff_limit, 
-                    extra_vars={"target_service": svc_name, "target_group": eff_limit, "LOCAL_SERVICES_DIR": str(engine.config.services_dir)}
+                    name_override=svc_name,
+                    playbook_path=pb_path,
+                    inventory_path="global/ansible/inventory.yml",
+                    limit=eff_limit,
+                    extra_vars={"target_service": svc_name, "target_group": eff_limit, "LOCAL_SERVICES_DIR": str(engine.config.services_dir)},
+                    extra_roles_paths=extra_roles
                 )
                 res = await stage.run(engine, context)
                 report[svc_name] = {"success": res.success, "successful_hosts": res.data.get("successful_hosts", 0), "failed_hosts": res.data.get("failed_hosts", 0)}

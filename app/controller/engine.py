@@ -26,7 +26,8 @@ from ...stages.git import (
 from ...stages.ansible import (
     AnsiblePlaybookStage,
     AsyncBulkRolloutStage,
-    ServiceDeployStage
+    ServiceDeployStage,
+    service_rollout_selector
 )
 from ...stages.rules import DynamicRuleExecutionStage
 
@@ -670,11 +671,16 @@ class SingleServiceStrategy(PipelineStrategy):
             else ("stage_test" if svc_branch == "test"
                   else f"service_{str(svc_name).replace('-', '_')}")
         )
+        # Route the execution playbook by the service's deploy_type: 'ansible'
+        # → native execution chain (plus its build roles dir appended to
+        # ANSIBLE_ROLES_PATH), anything else → docker_compose chain. Same
+        # "service" category / trigger endpoints either way.
+        playbook_path, extra_roles = service_rollout_selector(engine, svc_name)
         return [
             CloneServiceRepoStage(svc_name, svc_branch, payload),
             AnsiblePlaybookStage(
                 name_override=f"Single Service: {svc_name} ({svc_branch})",
-                playbook_path="playbooks/cd_playbooks/cd_rollout_single_service.yml",
+                playbook_path=playbook_path,
                 inventory_path="global/ansible/inventory.yml",
                 limit=target_group,
                 extra_vars={
@@ -683,6 +689,7 @@ class SingleServiceStrategy(PipelineStrategy):
                     "target_group": target_group,
                     "LOCAL_SERVICES_DIR": str(engine.config.services_dir),
                 },
+                extra_roles_paths=extra_roles,
             ),
         ]
 
@@ -2704,7 +2711,7 @@ class DeploymentEngine:
             "pending_envs": len(pending_envs),
         }
 
-    async def execute_ansible_docker(self, playbook_subpath: str, inventory_subpath: str, limit: str = None, extra_vars: dict = None, task_name: str = "global", job_id: int = 0, ssh_key_secret: str = "ansible_ssh_key", remote_user: str = "ansible-agent"):
+    async def execute_ansible_docker(self, playbook_subpath: str, inventory_subpath: str, limit: str = None, extra_vars: dict = None, task_name: str = "global", job_id: int = 0, ssh_key_secret: str = "ansible_ssh_key", remote_user: str = "ansible-agent", extra_roles_paths: list = None):
         key_path = None # Safe default so the 'finally' block doesn't crash on early exit
         
         if not shutil.which("docker"): return False, {"successful_hosts": 0, "failed_hosts": 0}
@@ -2761,13 +2768,21 @@ class DeploymentEngine:
             if job_id and self._job_inventory_snapshot_dir(job_id).exists():
                 inv_root = f".job_snapshots/job_{job_id}/inventory_state"
 
+            # Native/ansible deploys append the per-run rendered build roles dir
+            # (container-local /tmp/aac_builds/_ansible_roles/<service>, published
+            # by cd_rollout_single_service_ansible.yml) so `include_role:
+            # name=service` resolves. The shared config_engine roles stay first.
+            ansible_roles_path = "/data/storage/git_repos/config_engine/roles"
+            if extra_roles_paths:
+                ansible_roles_path += ":" + ":".join(str(p) for p in extra_roles_paths)
+
             cmd = [
                 "docker", "run", "-d", "--name", c_name, "--pull", "always",
                 "--label", f"iac_job_id={job_id}", "--label", f"iac_task_name={task_name}",
                 "-e", f"IAC_JOB_ID={job_id}",
                 "-v", f"{h_git}:/data/storage/git_repos", "-v", f"{h_svc}:/data/storage/services",
                 "-e", "ANSIBLE_HOST_KEY_CHECKING=False", "-e", "PYTHONUNBUFFERED=1", "-e", "ANSIBLE_NOCOLOR=1", "-e", "ANSIBLE_DEPRECATION_WARNINGS=0", "-e", "ANSIBLE_INTERPRETER_PYTHON=auto_silent",
-                "-e", "ANSIBLE_ROLES_PATH=/data/storage/git_repos/config_engine/roles", "-e", "PYTHONPATH=/data/storage/git_repos/aac_factory/scripts",
+                "-e", f"ANSIBLE_ROLES_PATH={ansible_roles_path}", "-e", "PYTHONPATH=/data/storage/git_repos/aac_factory/scripts",
                 "--entrypoint", "",
                 self.config.ansible_docker_image,
                 "/bin/sh", "-c", 
