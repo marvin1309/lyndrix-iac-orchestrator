@@ -17,7 +17,7 @@ This is the **same harness** as the `run-lyndrix-core` skill — same compose st
 same venv, same driver — just pointed at `/iac`.
 
 Paths below are relative to this plugin repo root (`lyndrix-plugin-iac-orchestrator/`).
-The core repo is its sibling `../lyndrix-core/`.
+The core repo is its sibling `../../lyndrix-core/`.
 
 ## Prerequisites
 
@@ -26,8 +26,8 @@ shared. `node`/`chromium-cli` are NOT used (chromium-cli is not available on thi
 host). Create it once if missing:
 
 ```bash
-python3 -m venv ../lyndrix-core/.dev/run-venv
-. ../lyndrix-core/.dev/run-venv/bin/activate
+python3 -m venv ../../lyndrix-core/.dev/run-venv
+. ../../lyndrix-core/.dev/run-venv/bin/activate
 pip install playwright
 python -m playwright install chromium
 sudo $(which python) -m playwright install-deps chromium   # system libs (libnspr4/libnss3/...)
@@ -35,17 +35,17 @@ sudo $(which python) -m playwright install-deps chromium   # system libs (libnsp
 
 ## Bring up the stack (with this plugin mounted)
 
-The plugin is already wired into `../lyndrix-core/docker/docker-compose.dev.yml`:
+The plugin is already wired into `../../lyndrix-core/docker/docker-compose.dev.yml`:
 
 ```
-- ../../lyndrix-plugin-iac-orchestrator:/app/plugins/iac_orchestrator
+- ../../plugins/lyndrix-plugin-iac-orchestrator:/app/plugins/iac_orchestrator
 ```
 
 Bring the stack up from the **core** repo (if `docker ps` already shows
 `lyndrix-core-dev` on `:8081`, skip this):
 
 ```bash
-docker compose -f ../lyndrix-core/docker/docker-compose.dev.yml up -d --build
+docker compose -f ../../lyndrix-core/docker/docker-compose.dev.yml up -d --build
 ```
 
 ## Ensure the plugin is enabled
@@ -62,15 +62,15 @@ curl -s http://localhost:8081/api/health | python3 -m json.tool | grep iac_orche
 If it is **not** listed, enable it once via the Plugin Manager UI: open
 `http://localhost:8081/plugins`, log in as `admin`, and toggle **"IaC Orchestrator"**
 to **Active**. The activation state persists in the MariaDB volume
-(`../lyndrix-core/.dev/db_data`), so it survives restarts. (Alternatively, add the
-repo to `LYNDRIX_PLUGINS_DESIRED` in `../lyndrix-core/docker/.env.dev`.)
+(`../../lyndrix-core/.dev/db_data`), so it survives restarts. (Alternatively, add the
+repo to `LYNDRIX_PLUGINS_DESIRED` in `../../lyndrix-core/docker/.env.dev`.)
 
 ## Run (agent path) — screenshot /iac
 
 ```bash
 cd .claude/skills/run-iac-orchestrator
-. ../../../../lyndrix-core/.dev/run-venv/bin/activate
-export LYNDRIX_ADMIN_PASSWORD="$(grep -E '^LYNDRIX_ADMIN_PASSWORD=' ../../../../lyndrix-core/docker/.env.dev | cut -d= -f2-)"
+. ../../lyndrix-core/.dev/run-venv/bin/activate
+export LYNDRIX_ADMIN_PASSWORD="$(grep -E '^LYNDRIX_ADMIN_PASSWORD=' ../../lyndrix-core/docker/.env.dev | cut -d= -f2-)"
 python driver.py --routes /iac --no-mobile --outdir shots
 ```
 
@@ -98,7 +98,7 @@ renders inside the **lyndrix-ui** shell (same running stack, no extra setup).
 Drive it with the sibling `run-lyndrix-ui` driver (run from this repo root):
 
 ```bash
-node ../lyndrix-ui/.claude/skills/run-lyndrix-ui/driver.mjs \
+node ../../lyndrix-ui/.claude/skills/run-lyndrix-ui/driver.mjs \
   '/apps/lyndrix-plugin-iac_orchestrator/iac' /tmp/iac-react.png
 ```
 
@@ -130,7 +130,7 @@ way to tell the two front-ends apart.
   driver waits ~2 s after login (NiceGUI session race) and retries once if a route
   bounces to `/login`.
 - **Secrets stay out of the repo.** The driver refuses to run without
-  `LYNDRIX_ADMIN_PASSWORD`; source it from `../lyndrix-core/docker/.env.dev`.
+  `LYNDRIX_ADMIN_PASSWORD`; source it from `../../lyndrix-core/docker/.env.dev`.
 - **`shots/` + the venv are gitignored** — only `SKILL.md` and `driver.py` are committed.
 
 ## Troubleshooting
@@ -138,14 +138,14 @@ way to tell the two front-ends apart.
 | Symptom | Fix |
 |---|---|
 | `/iac` shot shows the generic dashboard or a login card | Plugin not Active — toggle "IaC Orchestrator" on in `/plugins`; verify with the `/api/health` grep above. |
-| `error: set LYNDRIX_ADMIN_PASSWORD ...` | `export LYNDRIX_ADMIN_PASSWORD="$(grep -E '^LYNDRIX_ADMIN_PASSWORD=' ../../../../lyndrix-core/docker/.env.dev \| cut -d= -f2-)"`. |
+| `error: set LYNDRIX_ADMIN_PASSWORD ...` | `export LYNDRIX_ADMIN_PASSWORD="$(grep -E '^LYNDRIX_ADMIN_PASSWORD=' ../../lyndrix-core/docker/.env.dev \| cut -d= -f2-)"`. |
 | `libnspr4.so: cannot open shared object file` | `sudo $(which python) -m playwright install-deps chromium`. |
-| `curl: connection refused` on :8081 | Stack not up — `docker compose -f ../lyndrix-core/docker/docker-compose.dev.yml up -d`. |
+| `curl: connection refused` on :8081 | Stack not up — `docker compose -f ../../lyndrix-core/docker/docker-compose.dev.yml up -d`. |
 
 ## Stop
 
 ```bash
-docker compose -f ../lyndrix-core/docker/docker-compose.dev.yml down
+docker compose -f ../../lyndrix-core/docker/docker-compose.dev.yml down
 ```
 
 Keeps the DB/Vault volumes (and thus the plugin's Active state) intact. Add `-v`
