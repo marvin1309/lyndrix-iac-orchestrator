@@ -20,7 +20,7 @@ from .app.ui.widget import render_dashboard_widget as modular_widget
 manifest = ModuleManifest(
     id="lyndrix.plugin.iac_orchestrator",
     name="IaC Orchestrator",
-    version="0.10.1",
+    version="1.0.0",
     description="Standalone GitOps controller for executing Terraform and Ansible pipelines.",
     author="Lyndrix",
     icon="rocket_launch",
@@ -28,6 +28,28 @@ manifest = ModuleManifest(
     min_core_version="0.1.1",
     auto_enable_on_install=True,
     repo_url="https://github.com/lyndrix-platform/lyndrix-plugin-iac-orchestrator",
+    # Identity 2.0: fine-grained infra-apply permission (replaces the old
+    # hardcoded core builtin "iac:infra_apply") + roles auto-mapped onto the
+    # default groups. INT_ADMIN receives the qualified infra_apply once via the ledger.
+    custom_permissions=[
+        {"id": "api:infra_apply", "label": "Infrastruktur anwenden",
+         "description": "Trigger IaC infrastructure apply (terraform/ansible apply)",
+         "icon": "bolt"},
+    ],
+    roles=[
+        {"id": "admin", "label": "IaC Administrator",
+         "permissions": ["api:read", "api:write", "plugin:lyndrix.plugin.iac_orchestrator:api:infra_apply"],
+         "auto_map_groups": ["INT_ADMIN"],
+         "description": "Full IaC control including infrastructure apply."},
+        {"id": "operator", "label": "IaC Operator",
+         "permissions": ["api:read", "api:write"],
+         "auto_map_groups": [],
+         "description": "Trigger pipelines and edit configs, no infra apply."},
+        {"id": "viewer", "label": "IaC Viewer",
+         "permissions": ["api:read"],
+         "auto_map_groups": [],
+         "description": "Read-only dashboard and job history."},
+    ],
     ui_route="/iac",
     react_ui=True,
     # i18next-shaped namespace served to the React UI; core auto-registers

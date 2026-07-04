@@ -229,7 +229,7 @@ def build_plugin_router(service) -> APIRouter:
     @router.post("/infra/pending-plan/apply")
     async def apply_pending_plan(
         identity: ApiIdentity = Depends(require_permission("api:write")),
-        _apply: ApiIdentity = Depends(require_permission("iac:infra_apply")),
+        _apply: ApiIdentity = Depends(require_permission("plugin:lyndrix.plugin.iac_orchestrator:api:infra_apply")),
     ):
         return await _api.do_apply_pending_plan()
 
@@ -246,7 +246,7 @@ def build_plugin_router(service) -> APIRouter:
     @router.post("/infra/apply")
     async def infra_apply(
         identity: ApiIdentity = Depends(require_permission("api:write")),
-        _apply: ApiIdentity = Depends(require_permission("iac:infra_apply")),
+        _apply: ApiIdentity = Depends(require_permission("plugin:lyndrix.plugin.iac_orchestrator:api:infra_apply")),
     ):
         return await _api.do_trigger_infra_apply()
 
