@@ -98,14 +98,13 @@ def render_settings_ui(ctx, service):
     with ui.column().classes('w-full gap-6 pt-2'):
 
         # --- [SECTION 1: PIPELINE CONFIG] ---
-        with ui.card().classes(f'{UIStyles.CARD_GLASS} w-full').style('padding: 0; flex-wrap: nowrap'):
-            ui.element('div').classes('h-1 w-full bg-gradient-to-r from-indigo-400 via-sky-400 to-cyan-400')
+        with ui.card().classes(f'{UIStyles.CARD_GLASS} {UIStyles.CARD_ACCENT} w-full').style('padding: 0; flex-wrap: nowrap'):
             with ui.column().classes('w-full flex-grow p-5 gap-3'):
                 with ui.row().classes('items-center gap-2 mb-1'):
-                    ui.icon('tune', size='18px').classes('text-indigo-400')
-                    ui.label('Pipeline Configuration').classes('text-sm font-bold uppercase tracking-widest text-slate-300')
+                    ui.icon('tune', size='18px').classes('text-[var(--lx-accent)]')
+                    ui.label('Pipeline Configuration').classes('text-sm font-bold uppercase tracking-widest text-[var(--lx-text-muted)]')
                 ui.switch('Enable Auto-Apply').bind_value(current_config, 'auto_apply').props('color=primary')
-                ui.label('Warning: Auto-Apply executes infrastructure changes immediately on webhook receipt.').classes('text-xs text-orange-500 italic')
+                ui.label('Warning: Auto-Apply executes infrastructure changes immediately on webhook receipt.').classes('text-xs text-[var(--lx-warning)] italic')
                 ui.input(
                     'Test Deploy Allowed Hosts (comma-separated)',
                     placeholder='e.g. pve-test-01',
@@ -114,7 +113,7 @@ def render_settings_ui(ctx, service):
                 )
                 ui.label(
                     'Used by /api/iac/deploy/test-host/{host}; blocks rollout to non-allowlisted hosts.'
-                ).classes('text-xs text-slate-400')
+                ).classes('text-xs text-[var(--lx-text-muted)]')
 
                 def _allowlisted_hosts() -> list:
                     raw = current_config.get('test_deploy_allowed_hosts') or ''
@@ -125,13 +124,13 @@ def render_settings_ui(ctx, service):
                     return [h.strip() for h in items if h.strip()]
 
                 with ui.dialog() as test_deploy_dialog, ui.card().classes(
-                    f'{UIStyles.MODAL_CONTAINER} !bg-zinc-900 border border-violet-500/40'
+                    f'{UIStyles.MODAL_CONTAINER} dark:!bg-[var(--lx-elevated)] border border-[color-mix(in_srgb,var(--lx-accent-3)_40%,transparent)]'
                 ):
                     with ui.column().classes('gap-3 p-2'):
                         with ui.row().classes('items-center gap-2'):
-                            ui.icon('warning', size='22px').classes('text-violet-400')
-                            ui.label('Run test deploy?').classes('text-base font-bold text-slate-100')
-                        dialog_body = ui.label('').classes('text-xs text-slate-400 max-w-md')
+                            ui.icon('warning', size='22px').classes('text-[var(--lx-accent-3)]')
+                            ui.label('Run test deploy?').classes('text-base font-bold text-[var(--lx-text)]')
+                        dialog_body = ui.label('').classes('text-xs text-[var(--lx-text-muted)] max-w-md')
                         with ui.row().classes('w-full justify-end gap-2 mt-1'):
                             ui.button('Cancel', on_click=test_deploy_dialog.close).props(
                                 'flat rounded size=sm color=zinc'
@@ -183,17 +182,16 @@ def render_settings_ui(ctx, service):
                     ui.button('Save Pipeline Settings', on_click=save_settings, icon='save', color='primary').props('unelevated rounded size=sm')
 
         # --- [SECTION 2: REPOSITORY ROLES] ---
-        with ui.card().classes(f'{UIStyles.CARD_GLASS} w-full').style('padding: 0; flex-wrap: nowrap'):
-            ui.element('div').classes('h-1 w-full bg-gradient-to-r from-emerald-400 via-teal-400 to-green-400')
+        with ui.card().classes(f'{UIStyles.CARD_GLASS} {UIStyles.CARD_ACCENT_SUCCESS} w-full').style('padding: 0; flex-wrap: nowrap'):
             with ui.column().classes('w-full flex-grow p-5 gap-3'):
                 with ui.row().classes('items-center gap-2 mb-1'):
-                    ui.icon('folder_special', size='18px').classes('text-emerald-400')
-                    ui.label('Repository Roles Configuration').classes('text-sm font-bold uppercase tracking-widest text-slate-300')
+                    ui.icon('folder_special', size='18px').classes('text-[var(--lx-state-success)]')
+                    ui.label('Repository Roles Configuration').classes('text-sm font-bold uppercase tracking-widest text-[var(--lx-text-muted)]')
                 ui.label('Map your backend Git repositories to functional orchestrator roles.').classes(UIStyles.TEXT_MUTED)
 
                 for role in repo_roles:
                     current_repo_state = load_repo_config(role['slug'])
-                    with ui.expansion(role['label'], icon='folder').classes('w-full border border-zinc-700 bg-zinc-900'):
+                    with ui.expansion(role['label'], icon='folder').classes('w-full border border-[var(--lx-border-soft)] bg-[var(--lx-elevated)]'):
                         with ui.column().classes('p-4 w-full gap-2'):
                             url_input = ui.input('Git Repository URL', value=current_repo_state.get('url', '')).classes('w-full').props('outlined dense')
                             token_select = ui.select(options=token_options, value=current_repo_state.get('token_key', ''), label='Vault Credential').classes('w-full').props('outlined dense')
@@ -211,12 +209,11 @@ def render_settings_ui(ctx, service):
                                 ui.button('Save Role', on_click=lambda r=role, u=url_input, t=token_select: save_repo_config(r['slug'], u.value, t.value), icon='save', color='secondary').props('unelevated rounded size=sm')
 
         # --- [SECTION 3: NATIVE ANSIBLE CONFIG] ---
-        with ui.card().classes(f'{UIStyles.CARD_GLASS} w-full').style('padding: 0; flex-wrap: nowrap'):
-            ui.element('div').classes('h-1 w-full bg-gradient-to-r from-amber-400 via-orange-400 to-yellow-500')
+        with ui.card().classes(f'{UIStyles.CARD_GLASS} {UIStyles.CARD_ACCENT_WARNING} w-full').style('padding: 0; flex-wrap: nowrap'):
             with ui.column().classes('w-full flex-grow p-5 gap-3'):
                 with ui.row().classes('items-center gap-2 mb-1'):
-                    ui.icon('terminal', size='18px').classes('text-amber-400')
-                    ui.label('Ansible Docker Configuration').classes('text-sm font-bold uppercase tracking-widest text-slate-300')
+                    ui.icon('terminal', size='18px').classes('text-[var(--lx-warning)]')
+                    ui.label('Ansible Docker Configuration').classes('text-sm font-bold uppercase tracking-widest text-[var(--lx-text-muted)]')
                 ui.label('Configure the ephemeral Docker container and Registry Auth for Ansible Playbooks.').classes(UIStyles.TEXT_MUTED)
 
                 default_img = "registry.gitlab.int.fam-feser.de/iac-environment/iac-platform-assets/ansible-ci-image:latest"
@@ -226,7 +223,7 @@ def render_settings_ui(ctx, service):
                 key_input = ui.textarea('Ansible SSH Private Key (RSA)', value="********************************\n(Key is set. Overwrite to change)" if key_exists else "").props('outlined dense').classes('w-full')
 
                 ui.separator().classes('w-full my-2 opacity-50')
-                ui.label('Private Registry Authentication (Optional)').classes('text-sm font-bold text-slate-200')
+                ui.label('Private Registry Authentication (Optional)').classes('text-sm font-bold text-[var(--lx-text)]')
 
                 reg_url_val = ctx.get_secret("ansible_registry_url") or ""
                 reg_user_val = ctx.get_secret("ansible_registry_user") or ""
@@ -248,17 +245,16 @@ def render_settings_ui(ctx, service):
                     ui.button('Save Ansible Config', on_click=lambda: save_ansible_config(img_input.value, key_input.value, reg_url_input.value, reg_user_input.value, reg_token_input.value), icon='terminal', color='indigo').props('unelevated rounded size=sm')
 
         # --- [SECTION 3b: TERRAFORM PROVISIONING SECRETS] ---
-        with ui.card().classes(f'{UIStyles.CARD_GLASS} w-full').style('padding: 0; flex-wrap: nowrap'):
-            ui.element('div').classes('h-1 w-full bg-gradient-to-r from-purple-400 via-fuchsia-400 to-violet-500')
+        with ui.card().classes(f'{UIStyles.CARD_GLASS} {UIStyles.CARD_ACCENT} w-full').style('padding: 0; flex-wrap: nowrap'):
             with ui.column().classes('w-full flex-grow p-5 gap-3'):
                 with ui.row().classes('items-center gap-2 mb-1'):
-                    ui.icon('dns', size='18px').classes('text-purple-400')
-                    ui.label('Terraform Runner & Secrets').classes('text-sm font-bold uppercase tracking-widest text-slate-300')
+                    ui.icon('dns', size='18px').classes('text-[var(--lx-accent)]')
+                    ui.label('Terraform Runner & Secrets').classes('text-sm font-bold uppercase tracking-widest text-[var(--lx-text-muted)]')
                 ui.label('OpenTofu runner image plus the sensitive root credentials injected into provisioned hosts. Stored in Vault, never in the repo.').classes(UIStyles.TEXT_MUTED)
 
                 default_tf_img = "registry.gitlab.int.fam-feser.de/iac-environment/iac-platform-assets/opentofu-ci-image:latest"
                 tf_img_input = ui.input('OpenTofu Runner Image', value=ctx.get_secret("iac_terraform_docker_image") or default_tf_img).props('outlined dense').classes('w-full')
-                ui.label('Image used for every `tofu init/plan/apply`. Use the baked-mirror image so per-host init resolves bpg/proxmox locally (faster; no "context deadline exceeded" from registry.opentofu.org). Leave blank to fall back to ghcr.io/opentofu/opentofu:latest.').classes('text-xs text-slate-400')
+                ui.label('Image used for every `tofu init/plan/apply`. Use the baked-mirror image so per-host init resolves bpg/proxmox locally (faster; no "context deadline exceeded" from registry.opentofu.org). Leave blank to fall back to ghcr.io/opentofu/opentofu:latest.').classes('text-xs text-[var(--lx-text-muted)]')
                 ui.separator().classes('w-full my-2 opacity-30')
 
                 tf_key_exists = bool(ctx.get_secret("iac_tf_ssh_key"))
@@ -266,16 +262,16 @@ def render_settings_ui(ctx, service):
 
                 tf_priv_key_exists = bool(ctx.get_secret("iac_tf_ssh_private_key"))
                 tf_priv_key_input = ui.textarea('Root SSH Private Key (bootstrap / first compliance run)', value="********************************\n(Key is set. Overwrite to change)" if tf_priv_key_exists else "").props('outlined dense').classes('w-full')
-                ui.label('Private counterpart of the public key above. Used to connect as root for the initial compliance/bootstrap run before the ansible-agent account exists.').classes('text-xs text-slate-400')
+                ui.label('Private counterpart of the public key above. Used to connect as root for the initial compliance/bootstrap run before the ansible-agent account exists.').classes('text-xs text-[var(--lx-text-muted)]')
 
                 tf_root_pw_exists = bool(ctx.get_secret("iac_tf_root_password"))
                 tf_root_pw_input = ui.input('Root Password (new host)', password=True, value="********" if tf_root_pw_exists else "").props('outlined dense').classes('w-full')
 
                 tf_backend_secret_exists = bool(ctx.get_secret("iac_tf_backend_secret_key"))
                 tf_backend_secret_input = ui.input('State Backend Secret Key (S3/MinIO)', password=True, value="********" if tf_backend_secret_exists else "").props('outlined dense').classes('w-full')
-                ui.label('Shared across all sites/stages — set this here instead of putting backend.secret_key in stage_vars (covers onprem + hetzner).').classes('text-xs text-slate-400')
+                ui.label('Shared across all sites/stages — set this here instead of putting backend.secret_key in stage_vars (covers onprem + hetzner).').classes('text-xs text-[var(--lx-text-muted)]')
 
-                ui.label('These take precedence only when not set in terraform_vars; keeping them here keeps the repo free of private credentials.').classes('text-xs text-slate-400')
+                ui.label('These take precedence only when not set in terraform_vars; keeping them here keeps the repo free of private credentials.').classes('text-xs text-[var(--lx-text-muted)]')
 
                 def save_terraform_secrets(tf_img, ssh_key, priv_key, root_pw, backend_secret):
                     # Runner image is not a secret. Coalesce blank to the upstream
@@ -295,12 +291,11 @@ def render_settings_ui(ctx, service):
                     ui.button('Save Terraform Settings', on_click=lambda: save_terraform_secrets(tf_img_input.value, tf_key_input.value, tf_priv_key_input.value, tf_root_pw_input.value, tf_backend_secret_input.value), icon='dns', color='purple').props('unelevated rounded size=sm')
 
         # --- [SECTION 4: SECURITY CONFIG] ---
-        with ui.card().classes(f'{UIStyles.CARD_GLASS} w-full').style('padding: 0; flex-wrap: nowrap'):
-            ui.element('div').classes('h-1 w-full bg-gradient-to-r from-rose-400 via-pink-400 to-red-400')
+        with ui.card().classes(f'{UIStyles.CARD_GLASS} {UIStyles.CARD_ACCENT_DANGER} w-full').style('padding: 0; flex-wrap: nowrap'):
             with ui.column().classes('w-full flex-grow p-5 gap-3'):
                 with ui.row().classes('items-center gap-2 mb-1'):
-                    ui.icon('security', size='18px').classes('text-rose-400')
-                    ui.label('Security Configuration').classes('text-sm font-bold uppercase tracking-widest text-slate-300')
+                    ui.icon('security', size='18px').classes('text-[var(--lx-state-down)]')
+                    ui.label('Security Configuration').classes('text-sm font-bold uppercase tracking-widest text-[var(--lx-text-muted)]')
 
                 ui.label('Webhook Authentication').classes(UIStyles.TEXT_MUTED)
                 with ui.row().classes('w-full items-center gap-4'):
@@ -330,12 +325,11 @@ def render_settings_ui(ctx, service):
                     ui.button('Save Credential', on_click=add_new_credential, icon='lock', color='emerald').props('unelevated rounded size=sm')
 
         # --- [SECTION 4b: GITLAB WEBHOOK MANAGEMENT] ---
-        with ui.card().classes(f'{UIStyles.CARD_GLASS} w-full').style('padding: 0; flex-wrap: nowrap'):
-            ui.element('div').classes('h-1 w-full bg-gradient-to-r from-sky-400 via-blue-400 to-indigo-500')
+        with ui.card().classes(f'{UIStyles.CARD_GLASS} {UIStyles.CARD_ACCENT_INFO} w-full').style('padding: 0; flex-wrap: nowrap'):
             with ui.column().classes('w-full flex-grow p-5 gap-3'):
                 with ui.row().classes('items-center gap-2 mb-1'):
-                    ui.icon('webhook', size='18px').classes('text-sky-400')
-                    ui.label('GitLab Webhooks').classes('text-sm font-bold uppercase tracking-widest text-slate-300')
+                    ui.icon('webhook', size='18px').classes('text-[var(--lx-accent-2)]')
+                    ui.label('GitLab Webhooks').classes('text-sm font-bold uppercase tracking-widest text-[var(--lx-text-muted)]')
                 ui.label(
                     'Upsert merge-request-only webhooks for all projects in a GitLab group '
                     'to the Lyndrix orchestrator endpoint.'
@@ -373,7 +367,7 @@ def render_settings_ui(ctx, service):
                     'after boot and every interval (min 300s) so newly created service repos '
                     'get their hook without a manual upsert. Also exposed as '
                     'POST /api/iac/webhook/sync for iac-controller CI.'
-                ).classes('text-xs text-slate-400')
+                ).classes('text-xs text-[var(--lx-text-muted)]')
 
                 webhook_preview = ui.input(
                     'Webhook Endpoint Preview',
@@ -439,16 +433,18 @@ def render_settings_ui(ctx, service):
             service.state["last_deployment"] = "N/A"
             ui.notify(f"Cleared {deleted} job record(s). Statistics reset.", type="positive")
 
-        with ui.dialog() as clear_stats_dialog, ui.card().classes('bg-zinc-900 border border-rose-500/40'):
+        with ui.dialog() as clear_stats_dialog, ui.card().classes(
+            f'{UIStyles.MODAL_CONTAINER} dark:!bg-[var(--lx-elevated)] border border-[color-mix(in_srgb,var(--lx-state-down)_40%,transparent)]'
+        ):
             with ui.column().classes('gap-3 p-2'):
                 with ui.row().classes('items-center gap-2'):
-                    ui.icon('warning', size='22px').classes('text-rose-400')
-                    ui.label('Clear all statistics?').classes('text-base font-bold text-slate-100')
+                    ui.icon('warning', size='22px').classes('text-[var(--lx-state-down)]')
+                    ui.label('Clear all statistics?').classes('text-base font-bold text-[var(--lx-text)]')
                 ui.label(
                     'This permanently deletes all deployment job history that feeds the '
                     'Overview KPIs and recent-deployments feed. Currently running jobs are '
                     'kept. This cannot be undone.'
-                ).classes('text-xs text-slate-400 max-w-md')
+                ).classes('text-xs text-[var(--lx-text-muted)] max-w-md')
                 with ui.row().classes('w-full justify-end gap-2 mt-1'):
                     ui.button('Cancel', on_click=clear_stats_dialog.close).props('flat rounded size=sm color=zinc')
                     ui.button(
@@ -456,16 +452,15 @@ def render_settings_ui(ctx, service):
                         on_click=lambda: [clear_stats(), clear_stats_dialog.close()],
                     ).props('unelevated rounded size=sm')
 
-        with ui.card().classes(f'{UIStyles.CARD_GLASS} w-full').style('padding: 0; flex-wrap: nowrap'):
-            ui.element('div').classes('h-1 w-full bg-gradient-to-r from-rose-500 via-red-500 to-orange-500')
+        with ui.card().classes(f'{UIStyles.CARD_GLASS} {UIStyles.CARD_ACCENT_DANGER} w-full').style('padding: 0; flex-wrap: nowrap'):
             with ui.column().classes('w-full flex-grow p-5 gap-3'):
                 with ui.row().classes('items-center gap-2 mb-1'):
-                    ui.icon('cleaning_services', size='18px').classes('text-rose-400')
-                    ui.label('Maintenance').classes('text-sm font-bold uppercase tracking-widest text-slate-300')
+                    ui.icon('cleaning_services', size='18px').classes('text-[var(--lx-state-down)]')
+                    ui.label('Maintenance').classes('text-sm font-bold uppercase tracking-widest text-[var(--lx-text-muted)]')
 
                 with ui.row().classes('w-full items-center justify-between gap-4 flex-wrap'):
                     with ui.column().classes('gap-0.5'):
-                        ui.label('Sync Core Repositories').classes('text-sm font-semibold text-zinc-200')
+                        ui.label('Sync Core Repositories').classes('text-sm font-semibold text-[var(--lx-text)]')
                         ui.label(
                             'Fetches the latest state from all four core Git repositories '
                             '(IaC Controller, Inventory State, Config Engine, AaC Factory). '
@@ -479,7 +474,7 @@ def render_settings_ui(ctx, service):
                     ).props('unelevated rounded size=sm color=blue-6') \
                      .bind_enabled_from(service.state, 'is_running', backward=lambda x: not x)
 
-                ui.separator().classes('bg-zinc-800/40 my-1')
+                ui.separator().classes('bg-[var(--lx-border-soft)] my-1')
 
                 ui.label('Clear all deployment statistics and job history. Running jobs are preserved.').classes(UIStyles.TEXT_MUTED)
                 with ui.row().classes('w-full justify-end mt-2'):

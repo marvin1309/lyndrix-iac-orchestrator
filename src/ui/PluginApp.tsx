@@ -38,9 +38,15 @@ function goBack() {
   spaNavigate(p.endsWith('/settings') ? p.slice(0, -'/settings'.length) : p)
 }
 
+// Categorical "stem" palette → --lx-chart-1..8 (Theming v2 T1). Single source
+// of truth shared with the NiceGUI stack's components._STEM_CHART_VAR and
+// pipeline_meta's PhaseDef/PipelineTypeDef.color fields — same 8 keys, same
+// --lx-chart-N mapping, same order, so the two GUIs never drift apart again.
+// "zinc" is not a chart hue — it's the neutral fallback for "other" stems.
 const STEM_COLORS: Record<string, string> = {
-  violet: '#8b5cf6', sky: '#0ea5e9', emerald: '#10b981', amber: '#f59e0b',
-  rose: '#f43f5e', zinc: '#71717a', indigo: '#6366f1', teal: '#14b8a6',
+  violet: 'var(--lx-chart-1)', sky: 'var(--lx-chart-2)', emerald: 'var(--lx-chart-3)', amber: 'var(--lx-chart-4)',
+  rose: 'var(--lx-chart-5)', indigo: 'var(--lx-chart-6)', cyan: 'var(--lx-chart-7)', teal: 'var(--lx-chart-8)',
+  zinc: 'var(--lx-text-muted)',
 }
 function stemColor(s?: string): string {
   return STEM_COLORS[s || ''] || 'var(--lx-accent)'
@@ -82,12 +88,12 @@ function ProgressBar({ value, color }: { value: number; color?: string }) {
   const c = color ?? 'var(--lx-accent)'
   return (
     <div style={{
-      width: '100%', height: 6, borderRadius: 999,
+      width: '100%', height: 6, borderRadius: 'var(--lx-radius-full)',
       background: 'var(--lx-border-soft)', overflow: 'hidden',
     }}>
       <div style={{
         width: `${Math.max(0, Math.min(100, value))}%`, height: '100%',
-        background: c, transition: 'width 0.4s ease',
+        background: c, transition: 'width var(--lx-transition-slow) var(--lx-ease)',
       }} />
     </div>
   )
@@ -142,7 +148,7 @@ function Button({ label, onClick, variant = 'default', disabled, title, icon }: 
         : 'lx-btn lx-btn--secondary lx-btn--sm'
   const warnStyle: React.CSSProperties =
     variant === 'warn'
-      ? { color: '#f59e0b', borderColor: 'color-mix(in srgb, #f59e0b 40%, transparent)', background: 'color-mix(in srgb, #f59e0b 10%, transparent)' }
+      ? { color: 'var(--lx-warning)', borderColor: 'color-mix(in srgb, var(--lx-warning) 40%, transparent)', background: 'color-mix(in srgb, var(--lx-warning) 10%, transparent)' }
       : {}
   return (
     <button onClick={onClick} disabled={disabled} title={title}
@@ -158,7 +164,7 @@ function Modal({ title, onClose, children, width = 720 }: {
 }) {
   return (
     <div onClick={onClose} className="iac-modal-overlay" style={{
-      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 1000,
+      position: 'fixed', inset: 0, background: 'var(--lx-scrim)', zIndex: 1000,
       display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '2rem',
     }}>
       <div onClick={(e) => e.stopPropagation()} style={{
@@ -192,7 +198,7 @@ function ConfirmDialog({ opts, onClose }: { opts: ConfirmOpts; onClose: () => vo
   const { t } = useTranslation('iac')
   return (
     <div onClick={onClose} className="iac-modal-overlay iac-confirm-overlay" style={{
-      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 1100,
+      position: 'fixed', inset: 0, background: 'var(--lx-scrim)', zIndex: 1100,
       display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '2rem',
     }}>
       <div onClick={(e) => e.stopPropagation()} style={{
@@ -275,7 +281,7 @@ function LogViewer({ jobId, onClose }: { jobId: number; onClose: () => void }) {
 
   return (
     <div onClick={onClose} className="iac-modal-overlay" style={{
-      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 1000,
+      position: 'fixed', inset: 0, background: 'var(--lx-scrim)', zIndex: 1000,
       display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '2rem',
     }}>
       <div onClick={(e) => e.stopPropagation()} style={{
@@ -291,10 +297,7 @@ function LogViewer({ jobId, onClose }: { jobId: number; onClose: () => void }) {
           <input className="lx-input lx-mono iac-search" value={grep} onChange={(e) => setGrep(e.target.value)} placeholder={t('log.grepPlaceholder', { defaultValue: 'grep…' })} style={{ marginLeft: 'auto', width: 200 }} />
           <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--lx-text-muted)', cursor: 'pointer', fontSize: '1.1rem' }}>✕</button>
         </div>
-        <div ref={scrollRef} style={{
-          flex: 1, overflow: 'auto', background: '#000', padding: '0.75rem 1rem',
-          fontFamily: 'monospace', fontSize: '0.7rem', color: '#4ade80', whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-        }}>
+        <div ref={scrollRef} className="lx-terminal" style={{ flex: 1 }}>
           {err ? <span style={{ color: 'var(--lx-state-down)' }}>{err}</span>
             : lines.length ? lines.join('\n') : t('log.empty', { defaultValue: 'Keine Logs gefunden.' })}
         </div>
@@ -339,7 +342,7 @@ function ActivePipelines({ jobs, runnersByJob, onLogs }: {
                 <div style={{ flex: 1 }}><ProgressBar value={job.progress} /></div>
                 <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--lx-text)' }}>{job.progress}%</span>
               </div>
-              <div style={{ marginTop: 6, fontSize: '0.7rem', fontFamily: 'monospace', color: 'var(--lx-text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              <div style={{ marginTop: 6, fontSize: '0.7rem', fontFamily: 'var(--lx-font-mono)', color: 'var(--lx-text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                 {job.current_step || '…'}
               </div>
 
@@ -389,12 +392,12 @@ function History({ jobs, onLogs }: { jobs: IaCJob[]; onLogs: (id: number) => voi
             display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.6rem 1rem',
             borderTop: i === 0 ? 'none' : '1px solid var(--lx-border-soft)',
           }}>
-            <span style={{ width: 4, height: 30, borderRadius: 2, background: statusColor(job.status), flexShrink: 0 }} />
+            <span style={{ width: 4, height: 30, borderRadius: 'var(--lx-radius-sm)', background: statusColor(job.status), flexShrink: 0 }} />
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--lx-text)' }}>
                 #{job.id} · {describeType(job.pipeline_type)}
               </div>
-              <div style={{ fontSize: '0.66rem', color: 'var(--lx-text-muted)', fontFamily: 'monospace' }}>
+              <div style={{ fontSize: '0.66rem', color: 'var(--lx-text-muted)', fontFamily: 'var(--lx-font-mono)' }}>
                 {job.start_time} → {job.end_time}
               </div>
             </div>
@@ -437,7 +440,7 @@ function ServiceHistoryModal({ service, onClose, onLogs }: {
           display: 'flex', alignItems: 'center', gap: 12, padding: '0.5rem 0',
           borderTop: i === 0 ? 'none' : '1px solid var(--lx-border-soft)',
         }}>
-          <span style={{ fontFamily: 'monospace', fontSize: '0.72rem', color: 'var(--lx-text-muted)', width: 50 }}>#{r.id}</span>
+          <span style={{ fontFamily: 'var(--lx-font-mono)', fontSize: '0.72rem', color: 'var(--lx-text-muted)', width: 50 }}>#{r.id}</span>
           <span style={{ flex: 1, fontSize: '0.72rem', color: 'var(--lx-text)' }}>{r.start_time}</span>
           <StatusBadge status={r.status} />
           <button onClick={() => { onClose(); onLogs(r.id) }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--lx-accent)', fontSize: '0.72rem', fontWeight: 600 }}>{t('history.logs', { defaultValue: 'Logs' })}</button>
@@ -501,7 +504,7 @@ function ServiceCatalog({ confirm, toast, onLogs }: { confirm: ConfirmFn; toast:
               <div style={{ padding: '1rem' }}>
                 <div style={{ fontWeight: 700, color: 'var(--lx-text)', fontSize: '0.9rem' }}>{name}</div>
                 <div style={{ fontSize: '0.65rem', color: 'var(--lx-text-muted)' }}>{t('catalog.repo', { defaultValue: 'Repo: {{name}}', name: svc.repository_name || name })}</div>
-                <div style={{ display: 'flex', gap: '1rem', marginTop: '0.7rem', fontSize: '0.68rem', color: 'var(--lx-text-muted)', fontFamily: 'monospace' }}>
+                <div style={{ display: 'flex', gap: '1rem', marginTop: '0.7rem', fontSize: '0.68rem', color: 'var(--lx-text-muted)', fontFamily: 'var(--lx-font-mono)' }}>
                   <span>{target}</span>
                   <span>{branch}</span>
                 </div>
@@ -540,20 +543,20 @@ function Overview({ statsTick, isRunning, jobs, runningCount, onNavigate }: {
   if (error) return <ErrorBox msg={error} />
   if (!stats) return <div style={{ color: 'var(--lx-text-muted)', padding: '2rem', textAlign: 'center' }}>{t('overview.loading', { defaultValue: 'Lade Statistiken…' })}</div>
 
-  const rateColor = stats.success_rate >= 80 ? 'var(--lx-state-up)' : stats.success_rate >= 50 ? '#f59e0b' : 'var(--lx-state-down)'
+  const rateColor = stats.success_rate >= 80 ? 'var(--lx-state-up)' : stats.success_rate >= 50 ? 'var(--lx-warning)' : 'var(--lx-state-down)'
   const lastColor = stats.last_deployment_status === 'SUCCESS' ? 'var(--lx-state-up)'
-    : stats.last_deployment_status === 'RUNNING' ? '#f59e0b'
+    : stats.last_deployment_status === 'RUNNING' ? 'var(--lx-warning)'
       : FAIL_STATES.has(stats.last_deployment_status || '') ? 'var(--lx-state-down)' : undefined
   const byStatus = Object.entries(stats.by_status).sort((a, b) => b[1] - a[1])
 
   const pipelineBadge = runningCount > 0 ? (
-    <span style={{ background: 'var(--lx-accent)', color: '#000', borderRadius: 999, fontSize: '0.55rem', fontWeight: 800, padding: '1px 5px' }}>{runningCount}</span>
+    <span style={{ background: 'var(--lx-accent)', color: 'var(--lx-on-accent-text)', borderRadius: 'var(--lx-radius-full)', fontSize: '0.55rem', fontWeight: 800, padding: '1px 5px' }}>{runningCount}</span>
   ) : null
   const activeJob = jobs.find((j) => RUNNING_STATES.has((j.status || '').toUpperCase()))
   const phaseSuccessRate = stats.by_phase.length
     ? Math.round(stats.by_phase.reduce((a, p) => a + (p.total ? p.success_rate : 0), 0) / stats.by_phase.filter((p) => p.total > 0).length || 0)
     : null
-  const tileRateColor = stats.success_rate >= 80 ? 'var(--lx-state-up)' : stats.success_rate >= 50 ? '#f59e0b' : 'var(--lx-state-down)'
+  const tileRateColor = stats.success_rate >= 80 ? 'var(--lx-state-up)' : stats.success_rate >= 50 ? 'var(--lx-warning)' : 'var(--lx-state-down)'
 
   return (
     <div>
@@ -614,7 +617,7 @@ function Overview({ statsTick, isRunning, jobs, runningCount, onNavigate }: {
             }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--lx-text)' }}>{p.label}</span>
-                <span style={{ fontSize: '1.1rem', fontWeight: 800, fontFamily: 'monospace', color: c }}>{p.total}</span>
+                <span style={{ fontSize: '1.1rem', fontWeight: 800, fontFamily: 'var(--lx-font-mono)', color: c }}>{p.total}</span>
               </div>
               {p.total > 0 ? (
                 <div style={{ marginTop: 8 }}>
@@ -646,7 +649,7 @@ function Overview({ statsTick, isRunning, jobs, runningCount, onNavigate }: {
                 <div key={status} style={{ marginBottom: '0.6rem' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 3 }}>
                     <span style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--lx-text)' }}>{status}</span>
-                    <span style={{ fontSize: '0.66rem', fontFamily: 'monospace', color: 'var(--lx-text-muted)' }}>{count} · {Math.round(pct)}%</span>
+                    <span style={{ fontSize: '0.66rem', fontFamily: 'var(--lx-font-mono)', color: 'var(--lx-text-muted)' }}>{count} · {Math.round(pct)}%</span>
                   </div>
                   <ProgressBar value={pct} color={statusColor(status)} />
                 </div>
@@ -663,7 +666,7 @@ function Overview({ statsTick, isRunning, jobs, runningCount, onNavigate }: {
             {stats.recent.length === 0 && <div style={{ padding: '1rem', color: 'var(--lx-text-muted)', fontStyle: 'italic' }}>{t('overview.nothingHere', { defaultValue: 'Nothing here yet.' })}</div>}
             {stats.recent.map((j) => (
               <div key={j.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '0.4rem 1rem' }}>
-                <span style={{ width: 4, height: 22, borderRadius: 2, background: stemColor(j.color), flexShrink: 0 }} />
+                <span style={{ width: 4, height: 22, borderRadius: 'var(--lx-radius-sm)', background: stemColor(j.color), flexShrink: 0 }} />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: '0.74rem', color: 'var(--lx-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>#{j.id} {j.type_label}</div>
                   <div style={{ fontSize: '0.62rem', color: 'var(--lx-text-muted)' }}>{j.start_label} · {j.duration_human}</div>
@@ -743,8 +746,8 @@ function Provision({ confirm, toast, isRunning, statsTick }: {
       {hosts && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: '1rem', marginBottom: '1.25rem' }}>
           <KpiCard label={t('provision.kpiTotalHosts', { defaultValue: 'Total Hosts' })} value={hosts.length} />
-          <KpiCard label={t('provision.kpiManaged', { defaultValue: 'Terraform-Managed' })} value={managed.length} color="#8b5cf6" sub={t('provision.kpiManagedSub', { defaultValue: 'have a terraform block' })} />
-          <KpiCard label={t('provision.kpiUnmanaged', { defaultValue: 'Unmanaged' })} value={unmanaged.length} color="#f59e0b" sub={t('provision.kpiUnmanagedSub', { defaultValue: 'Ansible-only / manual' })} />
+          <KpiCard label={t('provision.kpiManaged', { defaultValue: 'Terraform-Managed' })} value={managed.length} color="var(--lx-accent-3)" sub={t('provision.kpiManagedSub', { defaultValue: 'have a terraform block' })} />
+          <KpiCard label={t('provision.kpiUnmanaged', { defaultValue: 'Unmanaged' })} value={unmanaged.length} color="var(--lx-warning)" sub={t('provision.kpiUnmanagedSub', { defaultValue: 'Ansible-only / manual' })} />
         </div>
       )}
 
@@ -762,7 +765,7 @@ function Provision({ confirm, toast, isRunning, statsTick }: {
               <div style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--lx-accent-3, var(--lx-accent))', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>{stage}</div>
               <div className="iac-card-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '0.75rem' }}>
                 {items.map((h) => {
-                  const c = h.managed ? '#8b5cf6' : 'var(--lx-state-unknown)'
+                  const c = h.managed ? 'var(--lx-accent-3)' : 'var(--lx-state-unknown)'
                   return (
                     <Card key={h.host} accent={c}>
                       <div style={{ padding: '0.85rem' }}>
@@ -773,7 +776,7 @@ function Provision({ confirm, toast, isRunning, statsTick }: {
                           </div>
                           <StatusBadge status={h.state === 'unknown' ? t('common.unknown', { defaultValue: 'UNKNOWN' }) : h.state.toUpperCase()} />
                         </div>
-                        <div style={{ marginTop: 8, fontSize: '0.66rem', fontFamily: 'monospace', color: 'var(--lx-text-muted)', display: 'grid', gap: 2 }}>
+                        <div style={{ marginTop: 8, fontSize: '0.66rem', fontFamily: 'var(--lx-font-mono)', color: 'var(--lx-text-muted)', display: 'grid', gap: 2 }}>
                           <div>{t('provision.addr', { defaultValue: 'addr: {{value}}', value: h.ansible_host })}</div>
                           <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t('provision.provider', { defaultValue: 'provider: {{value}}', value: h.provider })}</div>
                           <div>{t('provision.workspace', { defaultValue: 'workspace: {{value}}', value: h.workspace })}</div>
@@ -1069,7 +1072,7 @@ function AdvancedSettings({ toast, confirm }: { toast: ToastFn; confirm: Confirm
             {creds.map((alias) => (
               <div key={alias} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 12px', border: '1px solid var(--lx-border-soft)', borderRadius: 'var(--lx-radius-sm)' }}>
                 <span className="lx-mono" style={{ fontSize: '0.76rem', color: 'var(--lx-text)' }}>{alias}</span>
-                <button onClick={() => removeCredential(alias)} style={{ background: 'none', border: 'none', color: '#f87171', cursor: 'pointer', fontSize: '0.72rem' }}>{t('settings.remove', { defaultValue: 'Entfernen' })}</button>
+                <button onClick={() => removeCredential(alias)} style={{ background: 'none', border: 'none', color: 'var(--lx-state-down)', cursor: 'pointer', fontSize: '0.72rem' }}>{t('settings.remove', { defaultValue: 'Entfernen' })}</button>
               </div>
             ))}
           </div>
@@ -1151,7 +1154,7 @@ function SettingsPage({ confirm, toast }: { confirm: ConfirmFn; toast: ToastFn }
               <input type="checkbox" checked={cfg.auto_apply} onChange={(e) => patch({ auto_apply: e.target.checked })} id="auto_apply" />
               <label htmlFor="auto_apply" style={{ fontSize: '0.8rem', color: 'var(--lx-text)' }}>{t('settings.enableAutoApply', { defaultValue: 'Enable Auto-Apply' })}</label>
             </div>
-            <div style={{ fontSize: '0.66rem', color: '#f59e0b', fontStyle: 'italic', marginBottom: '0.8rem' }}>
+            <div style={{ fontSize: '0.66rem', color: 'var(--lx-warning)', fontStyle: 'italic', marginBottom: '0.8rem' }}>
               {t('settings.autoApplyWarning', { defaultValue: 'Warning: Auto-Apply executes infrastructure changes immediately on webhook receipt.' })}
             </div>
             <Field label={t('settings.testDeployHosts', { defaultValue: 'Test Deploy Allowed Hosts (comma-separated)' })} hint={t('settings.testDeployHostsHint', { defaultValue: 'Used by /api/iac/deploy/test-host/{host}; blocks rollout to non-allowlisted hosts.' })}>
@@ -1196,7 +1199,7 @@ function SettingsPage({ confirm, toast }: { confirm: ConfirmFn; toast: ToastFn }
               <Button label={t('settings.generateToken', { defaultValue: 'Generate Token' })} variant="warn" onClick={generateToken} />
             </div>
             {tokenReveal && (
-              <div style={{ fontSize: '0.64rem', color: '#f59e0b', marginTop: 6 }}>{t('settings.copyTokenOnce', { defaultValue: 'Copy this token now — it will not be shown again.' })}</div>
+              <div style={{ fontSize: '0.64rem', color: 'var(--lx-warning)', marginTop: 6 }}>{t('settings.copyTokenOnce', { defaultValue: 'Copy this token now — it will not be shown again.' })}</div>
             )}
           </SectionCard>
 
@@ -1304,13 +1307,17 @@ function NavTile({ icon, label, value, sub, accent, onClick, badge }: {
     <button className="iac-nav-tile lx-card" onClick={onClick} style={{
       display: 'flex', flexDirection: 'column', gap: 6,
       padding: '1rem', width: '100%', textAlign: 'left', cursor: 'pointer',
-      borderRadius: 'var(--lx-radius-md)', transition: 'border-color 0.18s, background 0.18s',
+      borderRadius: 'var(--lx-radius-md)',
+      transition: 'border-color var(--lx-transition-fast) var(--lx-ease), background var(--lx-transition-fast) var(--lx-ease)',
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
         <span className="material-icons" style={{ fontSize: 14, color: accent ?? 'var(--lx-accent)', flexShrink: 0 }}>{icon}</span>
         <span style={{ fontSize: '0.65rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--lx-text-muted)' }}>{label}</span>
         {badge}
-        <span className="iac-nav-tile-arrow material-icons" style={{ marginLeft: 'auto', fontSize: 13, color: 'var(--lx-text-muted)', opacity: 0.3, transition: 'opacity 0.18s, transform 0.18s' }}>arrow_forward</span>
+        <span className="iac-nav-tile-arrow material-icons" style={{
+          marginLeft: 'auto', fontSize: 13, color: 'var(--lx-text-muted)', opacity: 0.3,
+          transition: 'opacity var(--lx-transition-fast) var(--lx-ease), transform var(--lx-transition-fast) var(--lx-ease)',
+        }}>arrow_forward</span>
       </div>
       <div style={{ fontSize: '1.25rem', fontWeight: 800, color: accent ?? 'var(--lx-text)', lineHeight: 1.1 }}>{value}</div>
       {sub && <div style={{ fontSize: '0.67rem', color: 'var(--lx-text-muted)', lineHeight: 1.4 }}>{sub}</div>}
@@ -1357,7 +1364,7 @@ function PendingPlanBanner({ statsTick, isRunning, confirm, toast, onLogs }: {
 
   if (!plan?.pending) return null
   const envs = Object.entries(plan.envs || {})
-  const amber = '#f59e0b'
+  const amber = 'var(--lx-warning)'
 
   function applyNow() {
     confirm({
@@ -1404,7 +1411,7 @@ function PendingPlanBanner({ statsTick, isRunning, confirm, toast, onLogs }: {
       <div style={{ display: 'grid', gap: 4, marginTop: 8 }}>
         {envs.map(([env, info]) => (
           <div key={env} style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap', fontSize: '0.7rem' }}>
-            <span style={{ fontFamily: 'monospace', fontWeight: 700, color: amber }}>{env}</span>
+            <span style={{ fontFamily: 'var(--lx-font-mono)', fontWeight: 700, color: amber }}>{env}</span>
             <span style={{ color: 'var(--lx-text-muted)' }}>{info.summary}</span>
             {info.hosts_to_create.length > 0 && (
               <span style={{ color: 'var(--lx-state-up)' }}>
