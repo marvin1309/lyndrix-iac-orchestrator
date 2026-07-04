@@ -83,10 +83,10 @@ def render_overview_dashboard(ctx, service):
                     _phase_step(pdef, ps)
                     if idx < len(phases) - 1:
                         ui.icon("arrow_downward", size="22px").classes(
-                            "text-slate-300 dark:text-zinc-700 self-center shrink-0 sm:hidden"
+                            "text-[var(--lx-text-muted)] self-center shrink-0 sm:hidden"
                         )
                         ui.icon("chevron_right", size="22px").classes(
-                            "text-slate-300 dark:text-zinc-700 self-center shrink-0 hidden sm:block"
+                            "text-[var(--lx-text-muted)] self-center shrink-0 hidden sm:block"
                         )
 
         # ---- Breakdown + recent feed --------------------------------------
@@ -103,18 +103,18 @@ def render_overview_dashboard(ctx, service):
             with ui.row().classes("w-full items-center justify-between no-wrap"):
                 with ui.row().classes("items-center gap-2 no-wrap"):
                     ui.icon(pdef.icon, size="18px").classes(text_c)
-                    ui.label(pdef.label).classes("text-sm font-bold text-slate-700 dark:text-zinc-200")
+                    ui.label(pdef.label).classes("text-sm font-bold text-[var(--lx-text)]")
                 ui.label(str(total)).classes(f"text-lg font-black font-mono {text_c}")
-            ui.label(pdef.description).classes("text-[11px] text-slate-500 dark:text-zinc-400 leading-snug")
+            ui.label(pdef.description).classes("text-[length:var(--lx-text-2xs)] text-[var(--lx-text-muted)] leading-snug")
             if total:
                 c.progress_bar(rate, pdef.color)
-                with ui.row().classes("w-full justify-between text-[10px] text-slate-500 dark:text-zinc-400"):
+                with ui.row().classes("w-full justify-between text-[length:var(--lx-text-3xs)] text-[var(--lx-text-muted)]"):
                     ui.label(f"{ps.success} ok · {ps.failed} fail")
                     ui.label(f"{rate:.0f}%")
             else:
                 with ui.row().classes("items-center gap-1 w-fit"):
                     ui.icon("hourglass_empty", size="11px").classes(text_c)
-                    ui.label("No runs yet").classes(f"text-[10px] font-semibold {text_c}")
+                    ui.label("No runs yet").classes(f"text-[length:var(--lx-text-3xs)] font-semibold {text_c}")
 
     def _status_breakdown(s):
         with c.tile("sky", inner="w-full p-4 gap-3", hover=False):
@@ -122,21 +122,19 @@ def render_overview_dashboard(ctx, service):
             if not s.total:
                 ui.label("No deployments recorded yet.").classes(UIStyles.TEXT_MUTED + " italic")
                 return
-            palette = {
-                "SUCCESS": "emerald", "RUNNING": "amber",
-                "FAILED": "rose", "ERROR": "rose", "ABORTED": "zinc",
-            }
+            # Token-driven status colour — mirrors components.status_state()/status_var(),
+            # the single source shared with status_badge() and the React statusColor()
+            # (replaces the local "palette" dict that used to drift from the other two).
             for status, count in sorted(s.by_status.items(), key=lambda x: -x[1]):
-                color = palette.get(status, "indigo")
-                text_c = c.accent_text(color)
+                var_ref = c.status_var(status)
                 pct = (count / s.total) * 100
                 with ui.column().classes("w-full gap-1"):
                     with ui.row().classes("w-full justify-between items-center"):
                         with ui.row().classes("items-center gap-2"):
-                            ui.element("div").classes(f"h-2 w-2 rounded-full {text_c.replace('text-', 'bg-')}")
-                            ui.label(status.title()).classes("text-xs font-semibold text-slate-600 dark:text-zinc-300")
-                        ui.label(f"{count}  ·  {pct:.0f}%").classes("text-[11px] text-slate-500 dark:text-zinc-400 font-mono")
-                    c.progress_bar(pct, color)
+                            ui.element("div").classes("h-2 w-2 rounded-[var(--lx-radius-full)]").style(f"background: {var_ref}")
+                            ui.label(status.title()).classes("text-xs font-semibold text-[var(--lx-text-muted)]")
+                        ui.label(f"{count}  ·  {pct:.0f}%").classes("text-[length:var(--lx-text-2xs)] text-[var(--lx-text-muted)] font-mono")
+                    c.progress_bar(pct, var_override=var_ref)
 
     def _recent_feed(s):
         with c.tile("emerald", inner="w-full p-4 gap-2", hover=False):
@@ -150,17 +148,17 @@ def render_overview_dashboard(ctx, service):
                 for job in s.recent:
                     text_c = c.accent_text(job["color"])
                     with ui.row().classes(
-                        "w-full items-center gap-3 py-1.5 px-2 rounded-lg no-wrap "
-                        "hover:bg-slate-100 dark:hover:bg-zinc-800/60 transition-colors"
+                        "w-full items-center gap-3 py-1.5 px-2 rounded-[var(--lx-radius-lg)] no-wrap "
+                        f"{UIStyles.ROW_HOVER}"
                     ):
                         ui.icon(job["icon"], size="16px").classes(f"{text_c} shrink-0")
                         with ui.column().classes("gap-0 flex-grow min-w-0"):
                             ui.label(f"#{job['id']}  {job['type_label']}").classes(
-                                "text-xs font-semibold text-slate-700 dark:text-zinc-200 truncate"
+                                "text-xs font-semibold text-[var(--lx-text)] truncate"
                             )
                             ui.label(
                                 f"{job['start_label']}  ·  {stats_mod.humanize_duration(job['duration_s'])}"
-                            ).classes("text-[10px] text-slate-400 dark:text-zinc-500 truncate")
+                            ).classes("text-[length:var(--lx-text-3xs)] text-[var(--lx-text-muted)] truncate")
                         c.status_badge(job["status"])
 
     _board()

@@ -181,19 +181,19 @@ def render_terraform_panel(ctx, service):
 
         # Confirm dialog: whole-infra apply.
         with ui.dialog() as deploy_infra_dialog, ui.card().classes(
-            f"{UIStyles.MODAL_CONTAINER} !bg-zinc-900 border border-violet-500/40"
+            f"{UIStyles.MODAL_CONTAINER} dark:!bg-[var(--lx-elevated)] border border-[color-mix(in_srgb,var(--lx-accent-3)_40%,transparent)]"
         ):
             with ui.column().classes("gap-3 p-2"):
                 with ui.row().classes("items-center gap-2"):
-                    ui.icon("warning", size="22px").classes("text-violet-400")
+                    ui.icon("warning", size="22px").classes("text-[var(--lx-accent-3)]")
                     ui.label("Deploy entire infrastructure?").classes(
-                        "text-base font-bold text-slate-100"
+                        "text-base font-bold text-[var(--lx-text)]"
                     )
                 ui.label(
                     "This runs `tofu apply` across every Terraform environment and "
                     "will create, change or destroy real infrastructure to match the "
                     "desired plan. Run Check Env first to review the plan."
-                ).classes("text-xs text-slate-400 max-w-md")
+                ).classes("text-xs text-[var(--lx-text-muted)] max-w-md")
                 with ui.row().classes("w-full justify-end gap-2 mt-1"):
                     ui.button("Cancel", on_click=deploy_infra_dialog.close).props(
                         "flat rounded size=sm color=zinc"
@@ -233,12 +233,12 @@ def render_terraform_panel(ctx, service):
                 _panel.refresh()
 
             with ui.card().classes(
-                f"{UIStyles.CARD_BASE} w-full border border-amber-500/40 border-l-4 border-l-amber-500"
+                f"{UIStyles.CARD_BASE} w-full border border-[color-mix(in_srgb,var(--lx-warning)_40%,transparent)] border-l-4 border-l-[var(--lx-warning)]"
             ):
                 with ui.row().classes("w-full items-center gap-2 flex-wrap"):
-                    ui.icon("pending_actions", size="20px").classes("text-amber-400")
+                    ui.icon("pending_actions", size="20px").classes("text-[var(--lx-warning)]")
                     ui.label("Infrastructure plan awaiting approval").classes(
-                        "text-sm font-bold text-slate-100"
+                        "text-sm font-bold text-[var(--lx-text)]"
                     )
                     _meta = []
                     if pending.get("planned_at"):
@@ -246,7 +246,7 @@ def render_terraform_panel(ctx, service):
                     if pending.get("job_id"):
                         _meta.append(f"Job #{pending['job_id']}")
                     if _meta:
-                        ui.label(" · ".join(_meta)).classes("text-xs text-slate-500")
+                        ui.label(" · ".join(_meta)).classes("text-xs text-[var(--lx-text-muted)]")
                     with ui.row().classes("ml-auto items-center gap-2"):
                         ui.button("Dismiss", icon="close", on_click=_dismiss_pending).props(
                             "flat rounded size=sm color=zinc"
@@ -259,15 +259,15 @@ def render_terraform_panel(ctx, service):
                         )
                 for env_name, info in (pending.get("envs") or {}).items():
                     with ui.row().classes("items-baseline gap-2 flex-wrap"):
-                        ui.label(env_name).classes("text-xs font-mono font-bold text-amber-400")
-                        ui.label(str(info.get("summary") or "")).classes("text-xs text-slate-400")
+                        ui.label(env_name).classes("text-xs font-mono font-bold text-[var(--lx-warning)]")
+                        ui.label(str(info.get("summary") or "")).classes("text-xs text-[var(--lx-text-muted)]")
                         if info.get("hosts_to_create"):
                             ui.label("+ new: " + ", ".join(info["hosts_to_create"])).classes(
-                                "text-xs text-emerald-400"
+                                "text-xs text-[var(--lx-state-success)]"
                             )
                         if info.get("hosts_to_destroy"):
                             ui.label("− destroy: " + ", ".join(info["hosts_to_destroy"])).classes(
-                                "text-xs text-red-400"
+                                "text-xs text-[var(--lx-state-down)]"
                             )
 
         # Header + actions
@@ -321,7 +321,7 @@ def render_terraform_panel(ctx, service):
         if managed:
             with ui.row().classes("w-full items-center gap-3 mt-2"):
                 ui.element("div").classes(
-                    f"h-9 w-1 bg-gradient-to-b {c.accent_grad('violet')} shrink-0"
+                    f"h-9 w-1 {c.accent_grad('violet')} shrink-0"
                 )
                 ui.label("Terraform-Managed Hosts").classes(UIStyles.TITLE_H3)
             with ui.grid(columns="repeat(auto-fill, minmax(320px, 1fr))").classes("w-full gap-4"):
@@ -332,7 +332,7 @@ def render_terraform_panel(ctx, service):
         if unmanaged:
             with ui.row().classes("w-full items-center gap-3 mt-4"):
                 ui.element("div").classes(
-                    f"h-9 w-1 bg-gradient-to-b {c.accent_grad('amber')} shrink-0"
+                    f"h-9 w-1 {c.accent_grad('amber')} shrink-0"
                 )
                 ui.label("Awaiting Terraform Definition").classes(UIStyles.TITLE_H3)
             with ui.grid(columns="repeat(auto-fill, minmax(320px, 1fr))").classes("w-full gap-4"):
@@ -346,7 +346,7 @@ def render_terraform_panel(ctx, service):
             with ui.row().classes("w-full justify-between items-start no-wrap"):
                 with ui.column().classes("gap-0 min-w-0"):
                     ui.label(h["host"]).classes(
-                        "text-md font-bold text-slate-800 dark:text-zinc-100 truncate"
+                        "text-md font-bold text-[var(--lx-text)] truncate"
                     ).tooltip(h["host"])
                     ui.label(f"{h['site']} / {h['stage']}").classes(UIStyles.LABEL_MINI)
                 ui.icon("dns" if managed else "cloud_off", size="20px").classes(text_c)
@@ -360,10 +360,10 @@ def render_terraform_panel(ctx, service):
                 ("Workspace", h["workspace"], "folder"),
             ):
                 with ui.row().classes("w-full items-center gap-2 no-wrap"):
-                    ui.icon(icon, size="13px").classes("text-slate-400 dark:text-zinc-600 shrink-0")
-                    ui.label(label).classes("text-[11px] text-slate-400 dark:text-zinc-500 w-20 shrink-0")
+                    ui.icon(icon, size="13px").classes("text-[var(--lx-text-muted)] shrink-0")
+                    ui.label(label).classes("text-[length:var(--lx-text-2xs)] text-[var(--lx-text-muted)] w-20 shrink-0")
                     ui.label(str(value)).classes(
-                        "text-[11px] font-mono text-slate-600 dark:text-zinc-300 truncate"
+                        "text-[length:var(--lx-text-2xs)] font-mono text-[var(--lx-text-muted)] truncate"
                     )
 
             ui.separator().classes("mt-1 opacity-20")
@@ -383,24 +383,24 @@ def render_terraform_panel(ctx, service):
                         verify_btn.bind_enabled_from(state, "is_running", backward=lambda x: not x)
                 else:
                     ui.label("No terraform block").classes(
-                        "text-[10px] italic text-slate-400 dark:text-zinc-500"
+                        "text-[length:var(--lx-text-3xs)] italic text-[var(--lx-text-muted)]"
                     )
 
                 host_name = h["host"]
                 with ui.dialog() as provision_dialog, ui.card().classes(
-                    f"{UIStyles.MODAL_CONTAINER} !bg-zinc-900 border border-violet-500/40"
+                    f"{UIStyles.MODAL_CONTAINER} dark:!bg-[var(--lx-elevated)] border border-[color-mix(in_srgb,var(--lx-accent-3)_40%,transparent)]"
                 ):
                     with ui.column().classes("gap-3 p-2"):
                         with ui.row().classes("items-center gap-2"):
-                            ui.icon("warning", size="22px").classes("text-violet-400")
+                            ui.icon("warning", size="22px").classes("text-[var(--lx-accent-3)]")
                             ui.label(f"Provision host '{host_name}'?").classes(
-                                "text-base font-bold text-slate-100"
+                                "text-base font-bold text-[var(--lx-text)]"
                             )
                         ui.label(
                             "This runs Terraform to bring the host into existence, then "
                             "the Ansible compliance bootstrap and host rollout. Real "
                             "infrastructure will be created or changed."
-                        ).classes("text-xs text-slate-400 max-w-md")
+                        ).classes("text-xs text-[var(--lx-text-muted)] max-w-md")
                         with ui.row().classes("w-full justify-end gap-2 mt-1"):
                             ui.button("Cancel", on_click=provision_dialog.close).props(
                                 "flat rounded size=sm color=zinc"

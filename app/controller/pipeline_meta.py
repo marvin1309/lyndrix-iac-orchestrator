@@ -35,7 +35,11 @@ class PhaseDef:
     id: str
     label: str
     icon: str
-    color: str          # tailwind colour stem, e.g. "violet"
+    # Categorical "stem" name (violet/sky/emerald/amber/rose/indigo/cyan/teal, or
+    # the "zinc" neutral fallback). Resolved to a --lx-chart-1..8 CSS token by
+    # ui.components._STEM_CHART_VAR (NiceGUI) / STEM_COLORS in the React
+    # PluginApp.tsx — keep both in lock-step so the stem palette never drifts.
+    color: str
     description: str = ""
 
 

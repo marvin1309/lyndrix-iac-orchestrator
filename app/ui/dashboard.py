@@ -130,17 +130,22 @@ async def render_dashboard(ctx, service):
     LOG_SEED_BYTES = 200_000
     LOG_GREP_SCAN_BYTES = 1_000_000
 
-    with ui.dialog() as log_viewer, ui.card().classes(f'w-full max-w-5xl h-[90vh] sm:h-[80vh] p-0 flex flex-col no-wrap !bg-black {UIStyles.MODAL_CONTAINER}'):
-        with ui.row().classes('w-full p-3 sm:p-4 justify-between items-center gap-3 flex-wrap border-b border-zinc-800 bg-zinc-900'):
+    with ui.dialog() as log_viewer, ui.card().classes(
+        f'w-full max-w-5xl h-[90vh] sm:h-[80vh] p-0 flex flex-col no-wrap dark:!bg-[var(--lx-elevated)] {UIStyles.MODAL_CONTAINER}'
+    ):
+        with ui.row().classes('w-full p-3 sm:p-4 justify-between items-center gap-3 flex-wrap border-b border-[var(--lx-border-soft)] bg-[var(--lx-elevated)]'):
             with ui.row().classes('items-center gap-3 flex-wrap flex-1 min-w-0'):
-                log_title = ui.label("Live Stream").classes('text-indigo-400 font-bold shrink-0')
+                log_title = ui.label("Live Stream").classes('text-[var(--lx-accent)] font-bold shrink-0')
                 log_search = ui.input('Filter logs (grep)...').props('outlined dense clearable dark').classes('w-full sm:w-64')
             with ui.row().classes('items-center gap-1 shrink-0'):
                 ui.button(icon='download', on_click=lambda: download_full_log()).props('flat round dense color=zinc-500').tooltip('Download full log')
                 ui.button(icon='close', on_click=log_viewer.close).props('flat round dense color=zinc-500')
         # ui.log is an append-only, DOM-bounded element (older lines past max_lines are
         # dropped from the DOM) with built-in autoscroll — the right tool for streaming.
-        log_stream = ui.log(max_lines=4000).classes('w-full flex-grow min-h-0 bg-black font-mono text-[11px] text-green-500')
+        # UIStyles.TERMINAL is the shared green-on-black "raw console" look (--lx-terminal-*),
+        # matching the React LogViewer's terminal panel (see PluginApp.tsx LogViewer,
+        # which now uses the identical .lx-terminal class off the same tokens).
+        log_stream = ui.log(max_lines=4000).classes(f'w-full flex-grow min-h-0 {UIStyles.TERMINAL}')
 
     def download_full_log():
         jid = active_log_job["id"]
@@ -292,11 +297,11 @@ async def render_dashboard(ctx, service):
 
             with ui.tab_panel(catalog_tab).classes('gap-4 p-4'):
                 with ui.dialog() as svc_history_dialog, ui.card().classes(f'w-full max-w-4xl p-0 overflow-hidden {UIStyles.MODAL_CONTAINER} lyndrix-card'):
-                    with ui.row().classes('w-full justify-between items-center p-4 border-b border-slate-200 dark:border-zinc-800 bg-slate-50/50 dark:bg-zinc-900/50'):
+                    with ui.row().classes('w-full justify-between items-center p-4 border-b border-[var(--lx-border-soft)] bg-[var(--lx-elevated)]'):
                         with ui.row().classes('items-center gap-3'):
                             ui.icon('history', size='24px').classes('text-primary')
-                            svc_history_title = ui.label("").classes('text-lg font-bold text-slate-800 dark:text-zinc-100')
-                        ui.button(icon='close', on_click=svc_history_dialog.close).props('flat round dense').classes('text-slate-500 hover:text-slate-800 dark:hover:text-white transition-colors')
+                            svc_history_title = ui.label("").classes('text-lg font-bold text-[var(--lx-text)]')
+                        ui.button(icon='close', on_click=svc_history_dialog.close).props('flat round dense').classes('text-[var(--lx-text-muted)] hover:text-[var(--lx-text)] transition-colors')
                     
                     with ui.scroll_area().classes('w-full max-h-[60vh]'):
                         svc_history_table = ui.table(columns=[
@@ -304,7 +309,7 @@ async def render_dashboard(ctx, service):
                             {'name': 'start_time', 'label': 'Date', 'field': 'start_time', 'align': 'left'},
                             {'name': 'status', 'label': 'Status', 'field': 'status', 'align': 'left'},
                             {'name': 'action', 'label': 'Log', 'field': 'action', 'align': 'center'}
-                        ], rows=[], row_key='id').classes('w-full !bg-transparent shadow-none text-slate-800 dark:text-zinc-200').props('flat')
+                        ], rows=[], row_key='id').classes('w-full !bg-transparent shadow-none text-[var(--lx-text)]').props('flat')
                         svc_history_table.add_slot('body-cell-status', '''<q-td :props="props"><q-badge :color="props.value === 'SUCCESS' ? 'positive' : (props.value === 'RUNNING' ? 'warning' : 'negative')">{{props.value}}</q-badge></q-td>''')
                         svc_history_table.add_slot('body-cell-action', '''<q-td :props="props"><q-btn flat round size="sm" icon="article" color="primary" @click="() => $parent.$emit('view', props.row)" /></q-td>''')
                         svc_history_table.on('view', lambda e: show_job_logs_wrapper(e.args['id']))
@@ -344,16 +349,16 @@ async def render_dashboard(ctx, service):
                                 match = not term or term in name.lower() or term in repo_name.lower() or term in target_node.lower()
                                 
                                 if match:
-                                    with ui.card().classes(f'{UIStyles.CARD_BASE} flex flex-col hover:border-indigo-500 transition-colors').style('padding: 0; flex-wrap: nowrap'):
-                                        ui.element('div').classes('h-1 w-full bg-gradient-to-r from-sky-400 via-cyan-400 to-indigo-400')
+                                    with ui.card().classes(f'{UIStyles.CARD_BASE} flex flex-col hover:border-[var(--lx-accent)] transition-colors').style('padding: 0; flex-wrap: nowrap'):
+                                        ui.element('div').classes(f'h-1 w-full {c.accent_grad("sky")}')
                                         with ui.column().classes('w-full flex-grow p-4 gap-2'):
                                             with ui.row().classes('w-full justify-between items-start'):
                                                 with ui.column().classes('gap-0'):
                                                     ui.label(name).classes('text-md font-bold truncate')
-                                                    ui.label(f"Repo: {repo_name}").classes(f'{UIStyles.TEXT_MUTED} text-[10px] truncate')
+                                                    ui.label(f"Repo: {repo_name}").classes(f'{UIStyles.TEXT_MUTED} text-[length:var(--lx-text-3xs)] truncate')
 
                                                 if "compose" in deploy_type.lower():
-                                                    ui.html('<svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor"><path d="M6.1,10L0,10.1V13h6.1V10z M13.1,10H7v3h6.1V10z M20.1,10H14v3h6.1V10z M13.1,3H7v3h6.1V3z"/></svg>').classes('text-indigo-400 w-6 h-6').tooltip("Docker Compose")
+                                                    ui.html('<svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor"><path d="M6.1,10L0,10.1V13h6.1V10z M13.1,10H7v3h6.1V10z M20.1,10H14v3h6.1V10z M13.1,3H7v3h6.1V3z"/></svg>').classes('text-[var(--lx-accent)] w-6 h-6').tooltip("Docker Compose")
                                                 else:
                                                     ui.icon('settings_applications', color='slate-400').classes('text-xl').tooltip(deploy_type)
 
@@ -361,12 +366,12 @@ async def render_dashboard(ctx, service):
 
                                             with ui.row().classes('w-full justify-between items-center'):
                                                 with ui.row().classes('items-center gap-1'):
-                                                    ui.icon('dns', size='12px').classes('text-slate-400')
-                                                    ui.label(target_node).classes('text-xs text-slate-500 font-mono')
+                                                    ui.icon('dns', size='12px').classes('text-[var(--lx-text-muted)]')
+                                                    ui.label(target_node).classes('text-xs text-[var(--lx-text-muted)] font-mono')
 
                                                 with ui.row().classes('items-center gap-1'):
-                                                    ui.icon('call_split', size='12px').classes('text-slate-400')
-                                                    ui.label(branch).classes('text-xs text-slate-500 font-mono')
+                                                    ui.icon('call_split', size='12px').classes('text-[var(--lx-text-muted)]')
+                                                    ui.label(branch).classes('text-xs text-[var(--lx-text-muted)] font-mono')
 
                                             ui.separator().classes('mt-auto mb-3 opacity-20')
 
@@ -418,30 +423,30 @@ async def render_dashboard(ctx, service):
                                 
                             for site, stages in sorted(sites.items()):
                                 with ui.column().classes('w-full mt-4 gap-2'):
-                                    with ui.row().classes('w-full items-center gap-3 border-b border-zinc-800 pb-2'):
-                                        ui.icon('domain', size='24px').classes('text-slate-400')
-                                        ui.label(site.upper()).classes('text-xl font-black tracking-widest text-slate-800 dark:text-slate-200')
+                                    with ui.row().classes('w-full items-center gap-3 border-b border-[var(--lx-border-soft)] pb-2'):
+                                        ui.icon('domain', size='24px').classes('text-[var(--lx-text-muted)]')
+                                        ui.label(site.upper()).classes('text-xl font-black tracking-widest text-[var(--lx-text)]')
                                         ui.space()
                                         ui.button('Site Bootstrap', icon='verified_user', on_click=lambda s=site: ctx.emit("iac:webhook_verified", {"pipeline_type": "bootstrap_compliance", "limit": s, "manual": True})).props('flat rounded size=sm color=sky').bind_enabled_from(state, 'is_running', backward=lambda x: not x).tooltip(f"Run compliance/baseline (as root) across all {site.upper()} hosts")
                                         ui.button('Site Adopt', icon='move_to_inbox', on_click=lambda s=site: ctx.emit("iac:webhook_verified", {"pipeline_type": "adopt_host", "limit": s, "manual": True})).props('flat rounded size=sm color=amber-7').bind_enabled_from(state, 'is_running', backward=lambda x: not x).tooltip(f"Import all managed {site.upper()} containers into Terraform state")
                                         ui.button('Site Rollout', icon='rocket_launch', on_click=lambda s=site: ctx.emit("iac:webhook_verified", {"pipeline_type": "rollout", "limit": s, "manual": True})).props('flat rounded size=sm color=slate').bind_enabled_from(state, 'is_running', backward=lambda x: not x).tooltip(f"Rollout all hosts in {site.upper()}")
 
                                     for stage, items in sorted(stages.items()):
-                                        with ui.column().classes('w-full pl-4 md:pl-6 border-l-2 border-zinc-800/50 mt-2 gap-3'):
+                                        with ui.column().classes('w-full pl-4 md:pl-6 border-l-2 border-[var(--lx-border-soft)] mt-2 gap-3'):
                                             with ui.row().classes('items-center gap-2'):
-                                                ui.icon('layers', size='16px').classes('text-emerald-500')
-                                                ui.label(stage.upper()).classes('text-sm font-bold text-emerald-400 tracking-wider')
+                                                ui.icon('layers', size='16px').classes(c.accent_text('emerald'))
+                                                ui.label(stage.upper()).classes(f'text-sm font-bold {c.accent_text("emerald")} tracking-wider')
                                             
                                             with ui.grid(columns='repeat(auto-fill, minmax(350px, 1fr))').classes('w-full gap-4'):
                                                 for item in items:
                                                     host, svcs = item['host'], item['services']
-                                                    with ui.card().classes(f'{UIStyles.CARD_BASE} flex flex-col gap-2 hover:border-indigo-500/50 transition-all').style('padding: 0; flex-wrap: nowrap'):
-                                                        ui.element('div').classes('h-1 w-full bg-gradient-to-r from-emerald-400 via-teal-400 to-green-400')
+                                                    with ui.card().classes(f'{UIStyles.CARD_BASE} flex flex-col gap-2 hover:border-[color-mix(in_srgb,var(--lx-accent)_50%,transparent)] transition-all').style('padding: 0; flex-wrap: nowrap'):
+                                                        ui.element('div').classes(f'h-1 w-full {c.accent_grad("emerald")}')
                                                         with ui.column().classes('w-full flex-grow p-4 gap-2'):
-                                                            with ui.row().classes('w-full justify-between items-center border-b border-zinc-800/50 pb-2'):
+                                                            with ui.row().classes('w-full justify-between items-center border-b border-[var(--lx-border-soft)] pb-2'):
                                                                 with ui.row().classes('items-center gap-2'):
-                                                                    ui.icon('dns', size='18px').classes('text-slate-400')
-                                                                    ui.label(host).classes('text-md font-bold text-slate-800 dark:text-slate-300 truncate max-w-[150px]').tooltip(host)
+                                                                    ui.icon('dns', size='18px').classes('text-[var(--lx-text-muted)]')
+                                                                    ui.label(host).classes('text-md font-bold text-[var(--lx-text)] truncate max-w-[150px]').tooltip(host)
                                                                 with ui.row().classes('gap-1 items-center'):
                                                                     ui.button('Adopt Host', icon='move_to_inbox', on_click=lambda h=host: ctx.emit("iac:webhook_verified", {"pipeline_type": "adopt_host", "host_name": h, "manual": True})).props('unelevated rounded size=sm color=amber-7').tooltip(f"Import the existing container for {host} into Terraform state (import + plan, no apply)").bind_enabled_from(state, 'is_running', backward=lambda x: not x)
                                                                     ui.button('Init Host', icon='dns', on_click=lambda h=host: ctx.emit("iac:webhook_verified", {"pipeline_type": "init_host", "host_name": h, "manual": True})).props('unelevated rounded size=sm color=deep-purple').tooltip(f"Provision the container for {host} via Terraform only (no Ansible, no services)").bind_enabled_from(state, 'is_running', backward=lambda x: not x)
@@ -490,21 +495,19 @@ async def render_dashboard(ctx, service):
             pdef     = classify(p_type)
             progress = int(job.get('progress') or 0)
 
-            strip_color = (
-                'indigo'  if status == 'RUNNING'                        else
-                'rose'    if status in ('FAILED', 'ERROR', 'ABORTED')   else
-                'emerald' if status == 'SUCCESS'                         else
-                pdef.color
-            )
+            # Top stripe reflects the job's run STATE (up/down/accent/muted),
+            # not its phase — see components.status_state()/status_var(), the
+            # single source shared with status_badge() and the React statusColor().
             duration_str = _format_duration(job.get('start_time'), job.get('end_time'))
 
-            with c.tile(strip_color, inner='w-full p-3 gap-2', hover=False):
+            with c.tile(pdef.color, inner='w-full p-3 gap-2', hover=False,
+                        stripe_color=c.status_var(status)):
                 # Row 1: type label + status badge
                 with ui.row().classes('w-full items-center justify-between gap-2 flex-wrap'):
                     with ui.row().classes('items-center gap-2 min-w-0 flex-1'):
                         ui.icon(pdef.icon, size='16px').classes(c.accent_text(pdef.color))
                         ui.label(describe(p_type)).classes(
-                            'text-sm font-bold text-slate-800 dark:text-zinc-100 truncate'
+                            'text-sm font-bold text-[var(--lx-text)] truncate'
                         ).tooltip(describe(p_type))
                     c.status_badge(status)
 
@@ -530,7 +533,7 @@ async def render_dashboard(ctx, service):
                 step = (job.get('current_step') or '').strip()
                 if step:
                     ui.label(step).classes(
-                        UIStyles.TEXT_MUTED + ' text-[10px] font-mono truncate w-full'
+                        UIStyles.TEXT_MUTED + ' text-[length:var(--lx-text-3xs)] font-mono truncate w-full'
                     )
 
         _history_hash: list = [None]
@@ -547,28 +550,32 @@ async def render_dashboard(ctx, service):
             with jobs_grid:
                 for job in running_jobs:
                     if job.id not in active_job_cards:
-                        with ui.card().classes(f'{UIStyles.CARD_GLASS} flex flex-col shadow-2xl').style('padding: 0; flex-wrap: nowrap') as c:
-                            ui.element('div').classes('h-1 w-full bg-gradient-to-r from-indigo-400 via-violet-400 to-purple-400')
+                        # NB: the with-target is named `card_el` (not `c`) so it doesn't shadow
+                        # the `components as c` module import used for status_var() below.
+                        with ui.card().classes(f'{UIStyles.CARD_GLASS} flex flex-col shadow-2xl').style('padding: 0; flex-wrap: nowrap') as card_el:
+                            # These tiles are always RUNNING jobs (see the query above); the
+                            # stripe mirrors the React ActivePipelines' accent="var(--lx-accent)".
+                            ui.element('div').classes('h-1 w-full').style(f'background: {c.status_var("RUNNING")}')
                             with ui.column().classes('w-full flex-grow p-4 gap-0'):
                                 with ui.row().classes('w-full justify-between items-start'):
                                     with ui.column().classes('gap-0'):
-                                        ui.label(f"Pipeline #{job.id}").classes('text-lg font-bold text-indigo-400')
-                                        ui.label(job.pipeline_type).classes('text-[10px] uppercase text-slate-500 font-black tracking-widest')
+                                        ui.label(f"Pipeline #{job.id}").classes('text-lg font-bold text-[var(--lx-accent)]')
+                                        ui.label(job.pipeline_type).classes('text-[length:var(--lx-text-3xs)] uppercase text-[var(--lx-text-muted)] font-black tracking-widest')
                                     ui.spinner('tail', size='2em', color='indigo')
 
                                 with ui.linear_progress(value=(job.progress or 0)/100.0, show_value=False).props('color=indigo rounded stripe size=20px').classes('mt-4 relative') as p_bar:
-                                    pct_lbl = ui.label(f"{int(job.progress or 0)}%").classes('absolute-center text-[11px] font-bold text-white drop-shadow-md')
+                                    pct_lbl = ui.label(f"{int(job.progress or 0)}%").classes('absolute-center text-[length:var(--lx-text-2xs)] font-bold text-white drop-shadow-md')
                                 with ui.row().classes('w-full mt-1'):
-                                    step_lbl = ui.label(job.current_step).classes('text-[11px] font-mono text-slate-300 truncate w-full')
+                                    step_lbl = ui.label(job.current_step).classes('text-[length:var(--lx-text-2xs)] font-mono text-[var(--lx-text-muted)] truncate w-full')
 
-                                ui.label("Active Runners").classes('text-[10px] uppercase text-zinc-600 font-bold mt-4 mb-1')
-                                runner_box = ui.column().classes('w-full gap-1 p-2 bg-black/40 border border-zinc-800/50')
+                                ui.label("Active Runners").classes('text-[length:var(--lx-text-3xs)] uppercase text-[var(--lx-text-muted)] font-bold mt-4 mb-1')
+                                runner_box = ui.column().classes('w-full gap-1 p-2 bg-black/40 border border-[var(--lx-border-soft)]')
 
-                                with ui.row().classes('w-full mt-4 pt-2 border-t border-zinc-800 justify-between'):
+                                with ui.row().classes('w-full mt-4 pt-2 border-t border-[var(--lx-border-soft)] justify-between'):
                                     ui.button('Live Logs', icon='terminal', on_click=lambda j=job.id: open_live_logs(j)).props('flat rounded size=sm color=green')
                                     ui.button('Abort', icon='stop', on_click=abort_execution).props('flat rounded size=sm color=red')
                             
-                        active_job_cards[job.id] = {"card": c, "bar": p_bar, "step": step_lbl, "pct": pct_lbl, "runners": runner_box}
+                        active_job_cards[job.id] = {"card": card_el, "bar": p_bar, "step": step_lbl, "pct": pct_lbl, "runners": runner_box}
                     else:
                         card_meta = active_job_cards[job.id]
                         card_meta["bar"].set_value((job.progress or 0) / 100.0)
@@ -583,12 +590,12 @@ async def render_dashboard(ctx, service):
                                 with card_meta["runners"]:
                                     with ui.row().classes('w-full items-center gap-2 px-1'):
                                         ui.icon('settings_input_component', size='12px', color='amber-500')
-                                        ui.label(t_name).classes('text-[10px] text-slate-300 font-medium truncate w-4/5')
+                                        ui.label(t_name).classes('text-[length:var(--lx-text-3xs)] text-[var(--lx-text-muted)] font-medium truncate w-4/5')
                                         ui.spinner('dots', size='xs', color='slate-600').classes('ml-auto')
-                        
+
                         if not any_runners:
                             with card_meta["runners"]:
-                                ui.label("Waiting for pool...").classes('text-[10px] text-zinc-600 italic px-1')
+                                ui.label("Waiting for pool...").classes('text-[length:var(--lx-text-3xs)] text-[var(--lx-text-muted)] italic px-1')
 
             if tabs.value == 'History & Logs':
                 term     = (history_search.value or '').lower()
