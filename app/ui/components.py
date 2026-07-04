@@ -3,7 +3,7 @@ Reusable, theme-aware UI building blocks for the IaC Orchestrator dashboard.
 
 These intentionally build on ``ui.theme.UIStyles`` (the Lyndrix design system)
 instead of hardcoding backgrounds, so light/dark mode is handled by the central
-``lyndrix-card`` theming rather than ad-hoc Tailwind ``bg-white`` classes.
+``lyndrix-card`` theming rather than ad-hoc raw Tailwind background classes.
 """
 from __future__ import annotations
 
