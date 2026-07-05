@@ -36,17 +36,30 @@ manifest = ModuleManifest(
          "description": "Trigger IaC infrastructure apply (terraform/ansible apply)",
          "icon": "bolt"},
     ],
+    # NB: the core's role qualifier (`_qualify` in role_registry.py) passes any
+    # permission already starting with "api:"/"feature:"/"route:"/"plugin:" through
+    # UNCHANGED — it only namespaces bare suffixes. A bare "api:read"/"api:write"
+    # here would therefore land as a GLOBAL permission on the mapped group (every
+    # plugin's routes, not just ours), not one scoped to this plugin. Fully qualify
+    # every entry with this plugin's id, same as the existing infra_apply grant.
     roles=[
         {"id": "admin", "label": "IaC Administrator",
-         "permissions": ["api:read", "api:write", "plugin:lyndrix.plugin.iac_orchestrator:api:infra_apply"],
+         "permissions": [
+             "plugin:lyndrix.plugin.iac_orchestrator:api:read",
+             "plugin:lyndrix.plugin.iac_orchestrator:api:write",
+             "plugin:lyndrix.plugin.iac_orchestrator:api:infra_apply",
+         ],
          "auto_map_groups": ["INT_ADMIN"],
          "description": "Full IaC control including infrastructure apply."},
         {"id": "operator", "label": "IaC Operator",
-         "permissions": ["api:read", "api:write"],
+         "permissions": [
+             "plugin:lyndrix.plugin.iac_orchestrator:api:read",
+             "plugin:lyndrix.plugin.iac_orchestrator:api:write",
+         ],
          "auto_map_groups": [],
          "description": "Trigger pipelines and edit configs, no infra apply."},
         {"id": "viewer", "label": "IaC Viewer",
-         "permissions": ["api:read"],
+         "permissions": ["plugin:lyndrix.plugin.iac_orchestrator:api:read"],
          "auto_map_groups": [],
          "description": "Read-only dashboard and job history."},
     ],

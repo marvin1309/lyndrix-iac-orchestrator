@@ -6,8 +6,9 @@ Two routers live here:
     Mounted via ``ctx.register_routes()``. The plugin registry already wraps every
     route with ``require_api_auth`` (a route can never be served anonymously), so
     we do NOT add it again — we only add ``Depends(require_permission(...))`` for
-    authorization (``api:read`` on reads, ``api:write`` on actions). Core mounts it
-    at ``/api/plugins/lyndrix.plugin.iac_orchestrator/``.
+    authorization (plugin-scoped ``PERM_READ`` on reads, ``PERM_WRITE`` on actions;
+    global api:read/write still satisfies them via the core fallback). Core mounts
+    it at ``/api/plugins/lyndrix.plugin.iac_orchestrator/``.
 
 ``build_stream_router(svc)``
     The live job SSE stream. It is mounted DIRECTLY on the app (NOT via the
@@ -26,6 +27,14 @@ from .controller import api as _api
 
 PLUGIN_ID = "lyndrix.plugin.iac_orchestrator"
 
+# Plugin-scoped route gates. The core's compat fallback (access_service) lets a
+# global api:read/api:write holder satisfy these scoped ids — but NOT vice
+# versa — so gating on the bare ids would lock out groups holding only this
+# plugin's qualified viewer/operator role permissions. Gate on the scoped ids:
+# scoped grants unlock exactly this plugin, global grants keep working.
+PERM_READ = f"plugin:{PLUGIN_ID}:api:read"
+PERM_WRITE = f"plugin:{PLUGIN_ID}:api:write"
+
 
 def build_plugin_router(service) -> APIRouter:
     """The single auth'd IaC Orchestrator router — core mounts it at /api/plugins/<id>/."""
@@ -34,13 +43,13 @@ def build_plugin_router(service) -> APIRouter:
 
     # ── Reads (api:read) ─────────────────────────────────────────────────────
     @router.get("/catalog")
-    async def get_catalog(identity: ApiIdentity = Depends(require_permission("api:read"))):
+    async def get_catalog(identity: ApiIdentity = Depends(require_permission(PERM_READ))):
         return await _api.do_get_catalog()
 
     @router.get("/jobs")
     async def list_jobs(
         limit: int = 20,
-        identity: ApiIdentity = Depends(require_permission("api:read")),
+        identity: ApiIdentity = Depends(require_permission(PERM_READ)),
     ):
         return await _api.do_list_jobs(limit)
 
@@ -50,14 +59,14 @@ def build_plugin_router(service) -> APIRouter:
         tail: int = 200,
         grep: str | None = None,
         offset: int = 0,
-        identity: ApiIdentity = Depends(require_permission("api:read")),
+        identity: ApiIdentity = Depends(require_permission(PERM_READ)),
     ):
         return await _api.do_job_logs(job_id, tail=tail, grep=grep, offset=offset)
 
     @router.get("/jobs/{job_id}/runners")
     async def job_runners(
         job_id: int,
-        identity: ApiIdentity = Depends(require_permission("api:read")),
+        identity: ApiIdentity = Depends(require_permission(PERM_READ)),
     ):
         return await _api.do_job_runners(job_id)
 
@@ -65,30 +74,30 @@ def build_plugin_router(service) -> APIRouter:
     async def service_status(
         service_name: str,
         since_epoch: int = 0,
-        identity: ApiIdentity = Depends(require_permission("api:read")),
+        identity: ApiIdentity = Depends(require_permission(PERM_READ)),
     ):
         return await _api.do_get_service_status(service_name, since_epoch=since_epoch)
 
     @router.get("/stats")
-    async def stats(identity: ApiIdentity = Depends(require_permission("api:read"))):
+    async def stats(identity: ApiIdentity = Depends(require_permission(PERM_READ))):
         return await _api.do_get_stats()
 
     @router.get("/infrastructure/assignments")
     async def infra_assignments(
-        identity: ApiIdentity = Depends(require_permission("api:read")),
+        identity: ApiIdentity = Depends(require_permission(PERM_READ)),
     ):
         return await _api.do_load_assignments()
 
     @router.get("/infrastructure/terraform-hosts")
     async def infra_terraform_hosts(
-        identity: ApiIdentity = Depends(require_permission("api:read")),
+        identity: ApiIdentity = Depends(require_permission(PERM_READ)),
     ):
         return await _api.do_terraform_hosts()
 
     @router.get("/service/{service_name}/history")
     async def service_history(
         service_name: str,
-        identity: ApiIdentity = Depends(require_permission("api:read")),
+        identity: ApiIdentity = Depends(require_permission(PERM_READ)),
     ):
         return await _api.do_service_history(service_name)
 
@@ -97,32 +106,32 @@ def build_plugin_router(service) -> APIRouter:
     # the orchestrator settings surface under ``/settings/general`` (sub-paths do not
     # collide with core's exact-path route).
     @router.get("/settings/general")
-    async def get_settings(identity: ApiIdentity = Depends(require_permission("api:read"))):
+    async def get_settings(identity: ApiIdentity = Depends(require_permission(PERM_READ))):
         return await _api.do_get_settings()
 
     # Schema-driven, comprehensive settings surface (pipeline + webhooks + ansible +
     # terraform + repo roles). The React UI renders generically from /settings/schema.
     @router.get("/settings/schema")
     async def get_settings_schema(
-        identity: ApiIdentity = Depends(require_permission("api:read")),
+        identity: ApiIdentity = Depends(require_permission(PERM_READ)),
     ):
         return await _api.do_get_settings_schema()
 
     @router.get("/settings/values")
     async def get_settings_values(
-        identity: ApiIdentity = Depends(require_permission("api:read")),
+        identity: ApiIdentity = Depends(require_permission(PERM_READ)),
     ):
         return await _api.do_get_settings_values()
 
     @router.get("/settings/credentials")
     async def list_credentials(
-        identity: ApiIdentity = Depends(require_permission("api:read")),
+        identity: ApiIdentity = Depends(require_permission(PERM_READ)),
     ):
         return await _api.do_list_credentials()
 
     @router.get("/settings/webhook-token")
     async def get_webhook_token(
-        identity: ApiIdentity = Depends(require_permission("api:read")),
+        identity: ApiIdentity = Depends(require_permission(PERM_READ)),
     ):
         return await _api.do_get_webhook_token()
 
@@ -130,70 +139,70 @@ def build_plugin_router(service) -> APIRouter:
     @router.post("/pipeline")
     async def run_pipeline(
         payload: _api.PipelineRequest,
-        identity: ApiIdentity = Depends(require_permission("api:write")),
+        identity: ApiIdentity = Depends(require_permission(PERM_WRITE)),
     ):
         return await _api.do_run_pipeline(payload)
 
     @router.post("/abort")
-    async def abort(identity: ApiIdentity = Depends(require_permission("api:write"))):
+    async def abort(identity: ApiIdentity = Depends(require_permission(PERM_WRITE))):
         return await _api.do_abort()
 
     @router.post("/settings/general")
     async def save_settings(
         payload: _api.SettingsRequest,
-        identity: ApiIdentity = Depends(require_permission("api:write")),
+        identity: ApiIdentity = Depends(require_permission(PERM_WRITE)),
     ):
         return await _api.do_save_settings(payload)
 
     @router.post("/settings/values")
     async def save_settings_values(
         payload: _api.SettingsValuesRequest,
-        identity: ApiIdentity = Depends(require_permission("api:write")),
+        identity: ApiIdentity = Depends(require_permission(PERM_WRITE)),
     ):
         return await _api.do_save_settings_values(payload)
 
     @router.post("/settings/credentials")
     async def add_credential(
         payload: _api.CredentialRequest,
-        identity: ApiIdentity = Depends(require_permission("api:write")),
+        identity: ApiIdentity = Depends(require_permission(PERM_WRITE)),
     ):
         return await _api.do_add_credential(payload)
 
     @router.delete("/settings/credentials/{alias}")
     async def delete_credential(
         alias: str,
-        identity: ApiIdentity = Depends(require_permission("api:write")),
+        identity: ApiIdentity = Depends(require_permission(PERM_WRITE)),
     ):
         return await _api.do_delete_credential(alias)
 
     @router.post("/settings/webhook-token/generate")
     async def generate_webhook_token(
-        identity: ApiIdentity = Depends(require_permission("api:write")),
+        identity: ApiIdentity = Depends(require_permission(PERM_WRITE)),
     ):
         return await _api.do_generate_webhook_token()
 
     @router.post("/settings/webhooks/sync")
     async def sync_webhooks(
-        identity: ApiIdentity = Depends(require_permission("api:write")),
+        identity: ApiIdentity = Depends(require_permission(PERM_WRITE)),
     ):
         return await _api.do_sync_webhooks_authed()
 
     @router.post("/maintenance/clear-stats")
-    async def clear_stats(identity: ApiIdentity = Depends(require_permission("api:write"))):
+    async def clear_stats(identity: ApiIdentity = Depends(require_permission(PERM_WRITE))):
         return await _api.do_clear_stats()
 
     @router.post("/maintenance/clear-failed-jobs")
-    async def clear_failed_jobs(identity: ApiIdentity = Depends(require_permission("api:write"))):
+    async def clear_failed_jobs(identity: ApiIdentity = Depends(require_permission(PERM_WRITE))):
         return await _api.do_clear_failed_jobs()
 
     @router.post("/maintenance/sync-repos")
-    async def sync_repos(identity: ApiIdentity = Depends(require_permission("api:write"))):
+    async def sync_repos(identity: ApiIdentity = Depends(require_permission(PERM_WRITE))):
         return await _api.do_sync_repos()
     @router.post("/deploy/service/{service_name}")
     async def deploy_service(
         service_name: str,
         payload: _api.DeployRequest,
-        identity: ApiIdentity = Depends(require_permission("api:write")),
+        identity: ApiIdentity = Depends(require_permission(PERM_WRITE)),
     ):
         return await _api.do_trigger_service_deployment(service_name, payload)
 
@@ -201,7 +210,7 @@ def build_plugin_router(service) -> APIRouter:
     async def deploy_test_host(
         host_name: str,
         payload: _api.TestHostDeployRequest,
-        identity: ApiIdentity = Depends(require_permission("api:write")),
+        identity: ApiIdentity = Depends(require_permission(PERM_WRITE)),
     ):
         return await _api.do_trigger_test_host_deployment(host_name, payload)
 
@@ -209,18 +218,18 @@ def build_plugin_router(service) -> APIRouter:
     async def bootstrap_host(
         host_name: str,
         payload: _api.TestHostDeployRequest,
-        identity: ApiIdentity = Depends(require_permission("api:write")),
+        identity: ApiIdentity = Depends(require_permission(PERM_WRITE)),
     ):
         return await _api.do_trigger_host_bootstrap(host_name, payload)
 
     @router.post("/infra/plan")
-    async def infra_plan(identity: ApiIdentity = Depends(require_permission("api:write"))):
+    async def infra_plan(identity: ApiIdentity = Depends(require_permission(PERM_WRITE))):
         return await _api.do_trigger_infra_plan()
 
     # ── Pending plan review-and-approve flow ─────────────────────────────────
     @router.get("/infra/pending-plan")
     async def get_pending_plan(
-        identity: ApiIdentity = Depends(require_permission("api:read")),
+        identity: ApiIdentity = Depends(require_permission(PERM_READ)),
     ):
         return await _api.do_get_pending_plan()
 
@@ -228,14 +237,14 @@ def build_plugin_router(service) -> APIRouter:
     # high-privilege permission as /infra/apply.
     @router.post("/infra/pending-plan/apply")
     async def apply_pending_plan(
-        identity: ApiIdentity = Depends(require_permission("api:write")),
+        identity: ApiIdentity = Depends(require_permission(PERM_WRITE)),
         _apply: ApiIdentity = Depends(require_permission("plugin:lyndrix.plugin.iac_orchestrator:api:infra_apply")),
     ):
         return await _api.do_apply_pending_plan()
 
     @router.post("/infra/pending-plan/dismiss")
     async def dismiss_pending_plan(
-        identity: ApiIdentity = Depends(require_permission("api:write")),
+        identity: ApiIdentity = Depends(require_permission(PERM_WRITE)),
     ):
         return await _api.do_dismiss_pending_plan()
 
@@ -245,7 +254,7 @@ def build_plugin_router(service) -> APIRouter:
     # (The master system key and superadmin role bypass both, as everywhere.)
     @router.post("/infra/apply")
     async def infra_apply(
-        identity: ApiIdentity = Depends(require_permission("api:write")),
+        identity: ApiIdentity = Depends(require_permission(PERM_WRITE)),
         _apply: ApiIdentity = Depends(require_permission("plugin:lyndrix.plugin.iac_orchestrator:api:infra_apply")),
     ):
         return await _api.do_trigger_infra_apply()
@@ -254,7 +263,7 @@ def build_plugin_router(service) -> APIRouter:
     # (same scope the stream itself needs), so the long-lived bearer token never
     # has to travel in a query string. See build_stream_router below.
     @router.post("/stream/ticket")
-    async def stream_ticket(identity: ApiIdentity = Depends(require_permission("api:read"))):
+    async def stream_ticket(identity: ApiIdentity = Depends(require_permission(PERM_READ))):
         return {"ticket": _api.issue_stream_ticket("api:read"), "expires_in": 60}
 
     return router

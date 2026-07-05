@@ -363,10 +363,14 @@ def _build_orchestrator_event(payload: dict) -> tuple[dict | None, str]:
     service_name = project_path.split("/")[-1].strip().lower()
     if not service_name:
         return None, "missing service name"
+    if not _is_safe_git_ref_token(service_name):
+        return None, f"invalid service_name derived from project path: {service_name!r}"
 
     ref = (attrs.get("ref") or project.get("default_branch") or "main").strip()
     if not ref:
         ref = "main"
+    if not _is_safe_git_ref_token(ref):
+        return None, f"invalid branch/ref: {ref!r}"
 
     pipeline_id = attrs.get("id") or attrs.get("iid")
     return {
@@ -420,6 +424,26 @@ def _safe_int(value, default: int) -> int:
 
 
 _HOST_LIMIT_PATTERN = re.compile(r"^[A-Za-z0-9._-]+$")
+
+
+def _is_safe_git_ref_token(value: str) -> bool:
+    """True if `value` is safe to use as a service-repo directory name and a
+    git ref (branch), e.g. via ``services_dir / service_name`` and
+    ``git fetch/checkout/reset/clone -b origin/{branch}`` in stages/git.py.
+
+    Reuses the host-token charset (`_HOST_LIMIT_PATTERN`) but additionally
+    rejects values the plain charset still lets through unsafely: a leading
+    '-' (git/argv would parse it as an option => option injection / RCE via
+    e.g. ``--upload-pack=``), a leading '.', and any '..' segment (path
+    traversal out of ``services_dir``).
+    """
+    if not value or not _HOST_LIMIT_PATTERN.fullmatch(value):
+        return False
+    if value.startswith("-") or value.startswith("."):
+        return False
+    if ".." in value:
+        return False
+    return True
 
 
 def _load_generated_inventory_hosts() -> set[str]:
@@ -534,6 +558,22 @@ async def do_trigger_service_deployment(service_name: str, payload: DeployReques
         raise HTTPException(status_code=500, detail="Context offline")
     normalized_service = str(service_name or "").strip().lower()
     branch = str(payload.branch or "main").strip() or "main"
+    if not _is_safe_git_ref_token(normalized_service):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Invalid service_name: only exact tokens [A-Za-z0-9._-] are allowed, "
+                "and it must not start with '-'/'.' or contain '..'."
+            ),
+        )
+    if not _is_safe_git_ref_token(branch):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Invalid branch: only exact tokens [A-Za-z0-9._-] are allowed, "
+                "and it must not start with '-'/'.' or contain '..'."
+            ),
+        )
     event_payload = {
         "pipeline_type": "single_service",
         "service_name": normalized_service,
