@@ -473,8 +473,12 @@ function ServiceCatalog({ confirm, toast, onLogs }: { confirm: ConfirmFn; toast:
       body: t('catalog.deployConfirmBody', { defaultValue: 'This triggers a single-service deployment of "{{name}}" on branch {{branch}}. Real services will be updated.', name, branch: branch || 'main' }),
       confirmLabel: t('catalog.deployConfirmLabel', { defaultValue: 'Deploy' }),
       onConfirm: () => {
+        // No optimistic "queued" toast: the backend emits a `deployment_started`
+        // notification (with the live job number) that is the single source of
+        // truth. Toasting here as well produced a duplicate "pipeline start"
+        // notice, and falsely claimed success when the engine's dispatch lock
+        // rejected the run as already-running.
         iacApi.deployService(name, branch || 'main')
-          .then(() => toast(t('catalog.deployQueued', { defaultValue: 'Deployment für "{{name}}" eingereiht.', name })))
           .catch((e) => toast(e instanceof Error ? e.message : t('catalog.deployError', { defaultValue: 'Deploy fehlgeschlagen' }), 'err'))
       },
     })
@@ -699,8 +703,9 @@ function Provision({ confirm, toast, isRunning, statsTick }: {
   useEffect(() => { load() }, [load, statsTick])
 
   function checkEnv() {
+    // The backend `deployment_started` notification is the single source of
+    // truth; an optimistic toast here just duplicated it.
     iacApi.infraPlan()
-      .then(() => toast(t('provision.checkEnvQueued', { defaultValue: 'Infrastructure plan (Check Env) queued.' })))
       .catch((e) => toast(e instanceof Error ? e.message : t('provision.planError', { defaultValue: 'Plan fehlgeschlagen' }), 'err'))
   }
   function deployInfra() {
@@ -709,8 +714,9 @@ function Provision({ confirm, toast, isRunning, statsTick }: {
       body: t('provision.deployInfraConfirmBody', { defaultValue: 'This runs `tofu apply` across every Terraform environment and will create, change or destroy real infrastructure to match the desired plan. Run Check Env first to review the plan.' }),
       confirmLabel: t('provision.deployInfraConfirmLabel', { defaultValue: 'Deploy Infra' }),
       onConfirm: () => {
+        // The backend `deployment_started` notification is the single source of
+        // truth; an optimistic toast here just duplicated it.
         iacApi.infraApply()
-          .then(() => toast(t('provision.deployInfraQueued', { defaultValue: 'Infrastructure deploy queued.' })))
           .catch((e) => toast(e instanceof Error ? e.message : t('provision.deployError', { defaultValue: 'Deploy fehlgeschlagen' }), 'err'))
       },
     })
@@ -818,8 +824,9 @@ function Assignments({ confirm, toast, isRunning }: { confirm: ConfirmFn; toast:
       body,
       confirmLabel: t('common.run', { defaultValue: 'Run' }),
       onConfirm: () => {
+        // The backend `deployment_started` notification is the single source of
+        // truth; toasting the response message here just duplicated it.
         iacApi.runPipeline(payload)
-          .then((r) => toast(r.message || t('assignments.queued', { defaultValue: 'Pipeline queued.' })))
           .catch((e) => toast(e instanceof Error ? e.message : t('assignments.triggerError', { defaultValue: 'Trigger fehlgeschlagen' }), 'err'))
       },
     })
