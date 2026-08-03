@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.1] - 2026-08-03
+
+### Fixed
+- **Git credential aliases can now contain hyphens and uppercase** — the Git Credential Manager rejected any alias not matching `^[a-z0-9_]+$`, which made it impossible to save a credential named after the hyphenated GitLab namespace (e.g. `gitlab-int`). The alias charset is now `^[A-Za-z0-9_-]+$` (hyphens are valid Vault KV keys), unblocking saving a new token to fix a failed repo sync. The reserved-key / `iac_` guard is now case-insensitive so the widened charset can't be used to slip past it.
+
 ## [0.9.0] - 2026-06-27
 
 ### Security / Changed

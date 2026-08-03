@@ -1381,7 +1381,11 @@ class CredentialRequest(BaseModel):
 # Git credential aliases double as Vault keys, so they are constrained to a safe
 # character set and may not collide with the plugin's own security-critical
 # secrets. Any ``iac_*`` key (engine configuration) is additionally reserved.
-_CREDENTIAL_ALIAS_RE = re.compile(r"^[a-z0-9_]+$")
+# Aliases become Vault KV data-dict keys, which safely allow letters, digits,
+# underscores and hyphens. Hyphens matter here because the operator's whole
+# GitLab namespace is hyphenated (e.g. "gitlab-int", "aac-template-engine"), so
+# forbidding them made natural credential names impossible to save.
+_CREDENTIAL_ALIAS_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 _RESERVED_CREDENTIAL_KEYS = frozenset({
     "gitlab_webhook_token",
     "ansible_ssh_key",
@@ -1452,9 +1456,12 @@ async def do_add_credential(payload: CredentialRequest):
     if not _CREDENTIAL_ALIAS_RE.match(alias):
         raise HTTPException(
             status_code=422,
-            detail="Alias must match ^[a-z0-9_]+$ (lowercase letters, digits, underscore).",
+            detail="Alias must match ^[A-Za-z0-9_-]+$ (letters, digits, underscore, hyphen).",
         )
-    if alias in _RESERVED_CREDENTIAL_KEYS or alias.startswith("iac_"):
+    # Compare case-insensitively so an alias like "Iac_foo" or "Gitlab_Webhook_Token"
+    # cannot slip past the reserved-key / "iac_" guard by varying letter case.
+    alias_lc = alias.lower()
+    if alias_lc in _RESERVED_CREDENTIAL_KEYS or alias_lc.startswith("iac_"):
         raise HTTPException(
             status_code=409,
             detail=f"Alias '{alias}' is reserved for engine configuration and cannot be used.",
