@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import json
 import os
 import yaml
@@ -73,9 +74,19 @@ class CloneServiceRepoStage(BaseStage):
                 if token_key:
                     svc_token = engine.ctx.get_secret(token_key)
             except Exception: pass
-        if repo_url.startswith("https://") and svc_token:
-            repo_url = repo_url.replace("https://", f"https://gitlab-ci-token:{svc_token}@")
         auth_env = os.environ.copy()
+        # Supply the HTTPS token per-invocation via an HTTP auth header instead of
+        # embedding it in the remote URL. Baking the token into the origin URL (the
+        # old behaviour) persisted it in .git/config at clone time, so a *rotated*
+        # token never took effect on an existing checkout — `git fetch origin` kept
+        # using the stale token and failed with "HTTP Basic: Access denied". Passing
+        # it through GIT_CONFIG_* keeps the credential in-process only (never on disk,
+        # never in argv) and always current. Mirrors core's git_service.
+        if repo_url.startswith("https://") and svc_token:
+            auth = base64.b64encode(f"gitlab-ci-token:{svc_token}".encode()).decode()
+            auth_env["GIT_CONFIG_COUNT"] = "1"
+            auth_env["GIT_CONFIG_KEY_0"] = "http.extraHeader"
+            auth_env["GIT_CONFIG_VALUE_0"] = f"Authorization: Basic {auth}"
         ssh_key = engine.ctx.get_secret("ansible_ssh_key")
         if ssh_key:
             key_path = engine.config.security_dir / "ansible_id_rsa"
@@ -102,6 +113,10 @@ class CloneServiceRepoStage(BaseStage):
             await _run_git(["git", "config", "--global", "--replace-all", "safe.directory", "*"])
             if (target_dir / ".git").exists():
                 git_cmds = [
+                    # Reset origin to the clean (token-less) URL first: repos cloned by
+                    # the old code have a stale token baked into origin's URL, which would
+                    # otherwise override the fresh header credential and keep failing auth.
+                    ["git", "remote", "set-url", "origin", repo_url],
                     ["git", "fetch", "origin", self.branch],
                     ["git", "checkout", "-f", self.branch],
                     ["git", "reset", "--hard", f"origin/{self.branch}"],
